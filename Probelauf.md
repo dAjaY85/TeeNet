@@ -42,6 +42,3 @@ Der vorangegangene Startversuch ohne fließenden Ladestrom wurde separat abgebro
 Die finale Fassung wurde zusätzlich auf das Abschalten im PV-Modus während einer laufenden Phasenhaltezeit geprüft: Einphasig 2,5 kW angefordert, nach Beginn des Stromflusses bewusst gestoppt und dabei PV gewählt. Die Ladung wurde nicht erneut freigegeben. Nach etwa 6,45 Sekunden lag der gemessene Strom unter 1 A; nach etwa 15,89 Sekunden waren Relais aus und die dreiphasige Stellung bestätigt. Nach etwa 22,19 Sekunden war die abschließende Prüfung beendet. Die zusätzliche fünfminütige Haltezeit für automatische PV-Phasenwechsel verzögerte diesen Stopp nicht.
 
 Start und anschließender Stopp wurden im Abschlusstest durch das Testprogramm ausgelöst. Kein ungeplanter Wiederanlauf und kein registrierter Ladeabbruch. Anschließend zweimal lesend bestätigt: Ladung aus, 0 W, Relais aus, Rückmeldung dreiphasig, Xemex und Shell erreichbar.
-
-Die Fehleranzeige steht jetzt in der obersten Statuszeile. Bei einer Sperre erscheint dort „Entsperren“. Entsperren lässt die Ladung ausgeschaltet; ein physischer Phasenfehler kann nur bei frischer stromloser Messung und passender Rückmeldung zurückgesetzt werden. Die Relais-Kachel und experimentelle Kennzeichnung wurden entfernt. Die normale Statuszeile ist in den Einstellungen abschaltbar; Fehler bleiben sichtbar.
-

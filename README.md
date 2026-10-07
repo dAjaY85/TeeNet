@@ -6,25 +6,25 @@ Lokale ESP32-S3-Steuerung für die **Shell Recharge Advanced 3.0**.
 
 ## Funktionen
 
-- Manuell laden oder PV-Überschuss nutzen; webbasierte Einrichtung und Bedienung.
-- MQTT für ioBroker und Home Assistant; je nach Hardware Shelly, Tasmota/Wattwächter, Xemex, Eastron oder Huawei und EM24-E1 Modbus TCP.
-- Optionale Hausakku-Nutzung, Wolkenpuffer, Ladeplan und Phasenumschaltung.
-- Verbrauch, Sitzungen, getrennte Netz-/Solarkosten, CSV-Export und OTA-Updates.
-- Ein gemeinsamer Start/Stopp-Knopf und eine dauerhaft sichtbare Statuszeile.
-- PV-Ladepriorität mit Hausakku-/Auto-Vorrang oder anteiliger Aufteilung.
-- Diagnoseprotokoll und Firmwareprüfung; begrenzte Netzwerkabfragen entlasten den ESP.
+- Ladeleistung manuell einstellen oder automatisch mit PV-Überschuss laden.
+- Über ioBroker und Home Assistant per MQTT steuern.
+- Hausakku einbeziehen und PV-Leistung zwischen Hausakku und Auto aufteilen.
+- Optional Ladeplan, Wolkenpuffer und automatische Phasenumschaltung nutzen.
+- Verbrauch, Ladesitzungen und Netz-/Solarkosten anzeigen und als CSV exportieren.
 
-Der USB-Webinstaller dient der Erstinstallation und löscht vorhandene Daten. Eingerichtete Geräte per OTA aktualisieren. Die Online-Demo arbeitet ohne Hardware.
+Einrichtung und Bedienung erfolgen im Browser. Die Online-Demo lässt sich ohne Hardware ausprobieren.
+
+## Installation
+
+Neue Geräte über den [USB-Webinstaller](https://teennet-demo.stetastic.chatgpt.site/install.html) installieren; dabei werden vorhandene Daten gelöscht. Eingerichtete Geräte unter **Update & Hilfe** per OTA aktualisieren. Firmware und Quellcode stehen bei den [Veröffentlichungen](https://github.com/stetastic/TeeNet/releases/latest).
 
 ## Hardware
 
-ESP32-S3 N16R8 (16 MB Flash) und zwei automatische RS485-Wandler mit 3,3-V-Logik. USB-Versorgung. Ein Bus zur Shell, der zweite zum externen Wallbox-Zähler. Die HTTP-Messanzeige der Shell wird nicht als Regelquelle genutzt.
+Empfohlen wird der erprobte **ESP32-S3 N16R8 mit 16 MB Flash** und USB-Versorgung. Ein automatischer RS485-Wandler mit 3,3-V-Logik verbindet ihn mit der Shell. Für einen RS485-Wallbox-Zähler wird ein zweiter Wandler benötigt.
 
-Der Hager ESC441 ist nur ein Beispiel für einen Schütz mit vier Öffnern. Bei der optionalen Phasenumschaltung unterbrechen zwei Öffner L2 und L3; L1, N und PE bleiben verbunden. Andere geeignete Modelle sind möglich. Spulenspannung, Belastbarkeit und Rückmeldung müssen passen. Siehe die bebilderte Anleitung.
+Ein **separater Zähler am Wallbox-Abgang** ist für die Regelung erforderlich. Die Shell muss für externes dynamisches Lastmanagement eingerichtet sein. Unterstützte Zähler und Anschlüsse beschreibt die [Anleitung](https://teennet-demo.stetastic.chatgpt.site/help).
 
-Der getestete Regelbereich dieses Aufbaus beträgt dreiphasig 5,5–11 kW und einphasig 2,0–3,5 kW. Er ist nicht als universelle Mindestleistung aller Fahrzeuge oder Wallboxen zu verstehen. Die Shell muss für externes dynamisches Lastmanagement eingerichtet sein.
-
-`Probelauf.md` enthält das historische Messprotokoll des erprobten Aufbaus; es ist keine allgemeine Kompatibilitätsgarantie.
+Am Referenzaufbau erprobt: dreiphasig 5,5–11 kW, einphasig 2,0–3,5 kW. Der nutzbare Bereich hängt von Fahrzeug und Aufbau ab. Details stehen im [Messprotokoll](Probelauf.md).
 
 ## Hinweis
 
