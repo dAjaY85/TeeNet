@@ -7,6 +7,7 @@
 
 #include "meter_json.h"
 #include "shelly_modbus.h"
+#include "em24_modbus.h"
 #include "huawei_modbus.h"
 
 #include <math.h>
@@ -131,6 +132,7 @@ static struct {
     int64_t at,started;
     bool running,ok,wallbox;
     int code;
+    uint8_t unit_id;
 } meter_preview;
 static int64_t shelly_scan_started;
 
@@ -448,14 +450,14 @@ static bool feedback_ready(int64_t now) {
     return meter_ready && (!network_wallbox_meter() || fresh(now,actual_at,EMS_METER_TTL));
 }
 static bool network_house_meter(void) {
-    return !strcmp(settings.house_meter_type,"tasmota") || !strcmp(settings.house_meter_type,"huawei") || shelly_meter_type(settings.house_meter_type);
+    return !strcmp(settings.house_meter_type,"tasmota") || !strcmp(settings.house_meter_type,"huawei") || !strcmp(settings.house_meter_type,"em24_tcp") || shelly_meter_type(settings.house_meter_type);
 }
 static bool serial_house_meter(void) { return !strcmp(settings.house_meter_type,"xemex") || sdm_profile(settings.house_meter_type)!=NULL; }
 static bool house_power_capable(void) { return network_house_meter() || sdm_profile(settings.house_meter_type)!=NULL; }
 static bool house_three_phase_current(void) {
     return (!strcmp(settings.house_meter_type,"xemex") && settings.house_xemex_coils==3) ||
         !strcmp(settings.house_meter_type,"sdm630") || !strcmp(settings.house_meter_type,"sdm630mct") ||
-        !strcmp(settings.house_meter_type,"shelly_gen2") ||
+        !strcmp(settings.house_meter_type,"shelly_gen2") || !strcmp(settings.house_meter_type,"em24_tcp") ||
         (!strcmp(settings.house_meter_type,"huawei") && settings.huawei_enabled);
 }
 
@@ -1105,12 +1107,20 @@ static bool read_house_meter(float currents[3],float *watts,bool *currents_valid
 
     char type[sizeof(settings.house_meter_type)],host[sizeof(settings.house_meter_host)];
     char path[sizeof(settings.house_power_path)];
+    uint8_t unit;
     LOCK(); bool online=wifi_online;strcpy(type,settings.house_meter_type);strcpy(host,settings.house_meter_host);
-    strcpy(path,settings.house_power_path);UNLOCK();
+    strcpy(path,settings.house_power_path);unit=settings.house_address;UNLOCK();
 
     if(!online) return false;
 
     *currents_valid=false;
+    if(!strcmp(type,"em24_tcp")){
+        em24_reading_t reading;
+        if(!read_em24_modbus(host,unit,&reading,2500))return false;
+        memcpy(currents,reading.current_a,sizeof(reading.current_a));
+        *watts=reading.active_power_w;*currents_valid=true;
+        return true;
+    }
     if(shelly_meter_type(type)){
         shelly_modbus_reading_t reading;
         if(!read_shelly_modbus(host,type,&reading,2500))return false;
@@ -2098,7 +2108,7 @@ static esp_err_t config_apply(httpd_req_t *req,cJSON *o,bool restore) {
     bool next_tasmota_house=!strcmp(next.house_meter_type,"tasmota");
     bool next_three_phase_house=(!strcmp(next.house_meter_type,"xemex") && next.house_xemex_coils==3) ||
         !strcmp(next.house_meter_type,"sdm630") || !strcmp(next.house_meter_type,"sdm630mct") ||
-        !strcmp(next.house_meter_type,"shelly_gen2") ||
+        !strcmp(next.house_meter_type,"shelly_gen2") || !strcmp(next.house_meter_type,"em24_tcp") ||
         (!strcmp(next.house_meter_type,"huawei") && next.huawei_enabled);
     if(next.battery_protect && (!(next.mqtt_enabled || (next.huawei_enabled && next.huawei_battery)) || !next.zero_feed_enabled || next.zero_reserve_w>0))
         return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,
@@ -2108,7 +2118,7 @@ static esp_err_t config_apply(httpd_req_t *req,cJSON *o,bool restore) {
             "Phasenumschaltung benoetigt das Relaisboard mit Relais 1 als Phasenschuetz.");
     if(next.grid_guard_enabled && !next_three_phase_house)
         return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,
-            "Hausanschlussschutz benoetigt drei Phasenstroeme: Xemex, SDM630, Shelly 3EM oder Huawei mit dreiphasigem Smart Power Sensor.");
+            "Hausanschlussschutz benoetigt drei Phasenstroeme: Xemex, SDM630, EM24, Shelly 3EM oder Huawei mit dreiphasigem Smart Power Sensor.");
     if(!valid || !settings_valid(&next) || (next.zero_feed_enabled && next_tasmota_house &&
        !house_query_url(next.house_meter_type,next.house_meter_host,next.house_power_path,house_url,sizeof(house_url))))
         return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Einstellungen pruefen: GPIOs muessen frei sein, Zaehler und Ladegrenzen zueinander passen. Hausstromschutz braucht drei gemessene Phasen; auch WLAN-Passwort pruefen.");
@@ -2719,12 +2729,15 @@ static esp_err_t shelly_scan_post(httpd_req_t *req) {
 static void meter_preview_task(void *arg) {
     (void)arg;
     char host[64],type[20],path[96];
-    bool wallbox;LOCK();strcpy(host,meter_preview.host);strcpy(type,meter_preview.type);strcpy(path,meter_preview.path);wallbox=meter_preview.wallbox;
+    bool wallbox;uint8_t unit;LOCK();strcpy(host,meter_preview.host);strcpy(type,meter_preview.type);strcpy(path,meter_preview.path);wallbox=meter_preview.wallbox;unit=meter_preview.unit_id;
     bool available=wifi_online && !restarting && !ota_in_progress;UNLOCK();
     float watts=0;int code=0;bool ok=false;
     if(available && shelly_meter_type(type)){
         shelly_modbus_reading_t reading;
         ok=read_shelly_modbus(host,type,&reading,2500);if(ok){watts=reading.active_power_w;code=200;}
+    }else if(available && !strcmp(type,"em24_tcp")){
+        em24_reading_t reading;ok=read_em24_modbus(host,unit,&reading,2500);
+        if(ok){watts=reading.active_power_w;code=200;}
     }else if(available){
         char url[256];char *body=malloc(8192);
         if(body && house_query_url(type,host,path,url,sizeof(url))){code=http_get_body(url,body,8192,3500);if(code==200)ok=house_power_parse(body,type,path,&watts);}
@@ -2742,6 +2755,7 @@ static esp_err_t meter_preview_get(httpd_req_t *req) {
     cJSON_AddStringToObject(o,"host",meter_preview.host);cJSON_AddStringToObject(o,"type",meter_preview.type);
     cJSON_AddStringToObject(o,"path",meter_preview.path);
     cJSON_AddStringToObject(o,"role",meter_preview.wallbox?"wallbox":"house");
+    cJSON_AddNumberToObject(o,"unit_id",meter_preview.unit_id);
     cJSON_AddNumberToObject(o,"watts",meter_preview.watts);
     cJSON_AddNumberToObject(o,"age_ms",meter_preview.at?now_ms()-meter_preview.at:-1);
     cJSON_AddNumberToObject(o,"http",meter_preview.code);
@@ -2754,17 +2768,22 @@ static esp_err_t meter_preview_post(httpd_req_t *req) {
     bool valid=cJSON_IsString(host) && host->valuestring[0] && strlen(host->valuestring)<64 &&
         cJSON_IsString(type) && strlen(type->valuestring)<20 && cJSON_IsString(path) && strlen(path->valuestring)<96 &&
         cJSON_IsString(role) && (!strcmp(role->valuestring,"house") || !strcmp(role->valuestring,"wallbox"));
-    if(valid)for(const char *p=host->valuestring;*p;p++)if(!((*p>='a'&&*p<='z')||(*p>='A'&&*p<='Z')||(*p>='0'&&*p<='9')||*p=='.'||*p=='-'))valid=false;
+    bool em24=valid && !strcmp(type->valuestring,"em24_tcp");
+    cJSON *unit=cJSON_GetObjectItemCaseSensitive(o,"unit_id");
+    int unit_id=1;
+    if(em24){valid=cJSON_IsNumber(unit) && unit->valuedouble==unit->valueint && unit->valueint>=1 && unit->valueint<=247 && !strcmp(role->valuestring,"house");if(valid)unit_id=unit->valueint;}
+    if(valid)for(const char *p=host->valuestring;*p;p++)if(!((*p>='a'&&*p<='z')||(*p>='A'&&*p<='Z')||(*p>='0'&&*p<='9')||*p=='.'||*p=='-'||(em24 && *p==':')))valid=false;
     char standard[256]={0};
-    if(valid && !shelly_meter_type(type->valuestring))valid=house_query_url(type->valuestring,host->valuestring,"",standard,sizeof(standard));
+    if(valid && !em24 && !shelly_meter_type(type->valuestring))valid=house_query_url(type->valuestring,host->valuestring,"",standard,sizeof(standard));
     /* Only known read-only status endpoints, never an arbitrary HTTP command. */
-    if(valid && !shelly_meter_type(type->valuestring) && house_power_is_url(path->valuestring))valid=standard[0] && !strcmp(standard,path->valuestring);
+    if(valid && !em24 && !shelly_meter_type(type->valuestring) && house_power_is_url(path->valuestring))valid=standard[0] && !strcmp(standard,path->valuestring);
     if(!valid){cJSON_Delete(o);return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Vorschau braucht Hostname und automatische Modellabfrage oder JSON-Pfad.");}
     LOCK();bool available=wifi_online && !wifi_ap_forced && !ota_in_progress && !restarting;
     bool busy=shell_scan_running || meter_preview.running || shelly_scan_running || huawei_scan_running || huawei_preview_running ||
         (meter_preview.started && now_ms()-meter_preview.started<3000);
     if(available && !busy){
         strcpy(meter_preview.host,host->valuestring);strcpy(meter_preview.type,type->valuestring);strcpy(meter_preview.path,path->valuestring);meter_preview.wallbox=!strcmp(role->valuestring,"wallbox");
+        meter_preview.unit_id=(uint8_t)unit_id;
         meter_preview.running=true;meter_preview.ok=false;meter_preview.at=0;meter_preview.started=now_ms();
     }
     UNLOCK();cJSON_Delete(o);

@@ -60,8 +60,9 @@ void settings_fixed_pins(settings_t *s) {
 }
 static bool pin_valid(int pin) { return pin==1 || pin==2 || (pin>=4 && pin<=18) || pin==21 || (pin>=38 && pin<=44) || pin==47; }
 bool settings_shell_pin_available(const settings_t *s,int pin,bool tx) {
+    bool wallbox_serial=strcmp(s->wallbox_meter_type,"shelly_gen2") && strcmp(s->wallbox_meter_type,"shelly_em1");
     if(!pin_valid(pin) || pin==(tx?s->wallbox_rx_pin:s->wallbox_tx_pin) ||
-       pin==s->xemex_tx_pin || pin==s->xemex_rx_pin) return false;
+       (wallbox_serial && (pin==s->xemex_tx_pin || pin==s->xemex_rx_pin))) return false;
     bool serial=!strcmp(s->house_meter_type,"xemex") || sdm_profile(s->house_meter_type)!=NULL;
     return !(serial && (pin==s->house_tx_pin || pin==s->house_rx_pin)) &&
         !(s->external_mode_input_enabled && pin==s->external_mode_input_pin) &&
@@ -76,13 +77,14 @@ bool settings_valid(const settings_t *s) {
        !memchr(s->wallbox_meter_host,0,sizeof(s->wallbox_meter_host)) ||
        !memchr(s->wallbox_meter_password,0,sizeof(s->wallbox_meter_password))) return false;
     bool house_serial=!strcmp(s->house_meter_type,"xemex") || sdm_profile(s->house_meter_type)!=NULL;
+    bool wallbox_serial=strcmp(s->wallbox_meter_type,"shelly_gen2") && strcmp(s->wallbox_meter_type,"shelly_em1");
     if(!strcmp(s->house_meter_type,"sdm230") || !strcmp(s->house_meter_type,"sdm120") ||
        (!strcmp(s->house_meter_type,"xemex") && s->house_xemex_coils!=3) || s->xemex_coils==2)return false;
     const int pins[]={s->wallbox_tx_pin,s->wallbox_rx_pin,s->wallbox_rts_pin,
         s->xemex_tx_pin,s->xemex_rx_pin,s->xemex_rts_pin,s->house_tx_pin,s->house_rx_pin,s->house_rts_pin,
         s->external_mode_input_pin,s->evu_input_pin,s->relay1_pin,s->relay2_pin,13};
     const bool used[]={true,true,s->wallbox_rts_pin!=-1,
-        true,true,s->xemex_rts_pin!=-1,
+        wallbox_serial,wallbox_serial,wallbox_serial && s->xemex_rts_pin!=-1,
         house_serial,house_serial,house_serial && s->house_rts_pin!=-1,
         s->external_mode_input_enabled,s->evu_input_enabled,
         s->relay_board_enabled,s->relay_board_enabled,s->phase_switch_enabled && s->phase_feedback_enabled};
@@ -115,13 +117,14 @@ bool settings_valid(const settings_t *s) {
         if (!isalnum(*p) && *p!='/' && *p!='_' && *p!='-') return false;
     if(!memchr(s->house_meter_type,0,sizeof(s->house_meter_type)) || !memchr(s->house_meter_host,0,sizeof(s->house_meter_host))) return false;
     if(strcmp(s->house_meter_type,"tasmota") && strcmp(s->house_meter_type,"shelly_gen2") && strcmp(s->house_meter_type,"shelly_em1") &&
-       strcmp(s->house_meter_type,"xemex") && strcmp(s->house_meter_type,"huawei") && !sdm_profile(s->house_meter_type)) return false;
+       strcmp(s->house_meter_type,"xemex") && strcmp(s->house_meter_type,"huawei") && strcmp(s->house_meter_type,"em24_tcp") && !sdm_profile(s->house_meter_type)) return false;
     if(!memchr(s->wallbox_meter_type,0,sizeof(s->wallbox_meter_type)) || !memchr(s->house_power_path,0,sizeof(s->house_power_path))) return false;
     bool network_wallbox=!strcmp(s->wallbox_meter_type,"shelly_gen2") || !strcmp(s->wallbox_meter_type,"shelly_em1");
     if(strcmp(s->wallbox_meter_type,"xemex") && !sdm_profile(s->wallbox_meter_type) && !network_wallbox) return false;
     if(s->meter_baud!=1200 && s->meter_baud!=2400 && s->meter_baud!=4800 && s->meter_baud!=9600 && s->meter_baud!=19200 && s->meter_baud!=38400) return false;
     bool house_url=!strncmp(s->house_power_path,"http://",7) || !strncmp(s->house_power_path,"https://",8);
-    bool network_house=!strcmp(s->house_meter_type,"tasmota") || !strcmp(s->house_meter_type,"shelly_gen2") || !strcmp(s->house_meter_type,"shelly_em1");
+    bool network_house=!strcmp(s->house_meter_type,"tasmota") || !strcmp(s->house_meter_type,"shelly_gen2") || !strcmp(s->house_meter_type,"shelly_em1") || !strcmp(s->house_meter_type,"em24_tcp");
+    if(!strcmp(s->house_meter_type,"em24_tcp") && !s->house_meter_host[0])return false;
     bool directional_house=network_house || !strcmp(s->house_meter_type,"huawei") || sdm_profile(s->house_meter_type)!=NULL;
     if(!memchr(s->shell_setup_host,0,sizeof(s->shell_setup_host)))return false;
     for(const unsigned char *p=(const unsigned char *)s->shell_setup_host;*p;p++)if(!isalnum(*p)&&*p!='.'&&*p!='-')return false;
@@ -151,7 +154,7 @@ bool settings_valid(const settings_t *s) {
         s->house_xemex_coils>=1 && s->house_xemex_coils<=3 &&
         (!s->grid_guard_enabled || ((!strcmp(s->house_meter_type,"xemex") && s->house_xemex_coils==3) ||
             !strcmp(s->house_meter_type,"sdm630") || !strcmp(s->house_meter_type,"sdm630mct") ||
-            !strcmp(s->house_meter_type,"shelly_gen2") ||
+            !strcmp(s->house_meter_type,"shelly_gen2") || !strcmp(s->house_meter_type,"em24_tcp") ||
             (!strcmp(s->house_meter_type,"huawei") && s->huawei_enabled)));
 }
 bool settings_decode(const void *blob,size_t length,settings_t *out) {

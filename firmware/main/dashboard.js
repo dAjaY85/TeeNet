@@ -23,7 +23,7 @@ let meterScanning=false,meterResults=[];
 let scanFamily='',scanTarget='house',previewRunning=false,previewRole='house',previewTurn=0;
 const previewKeys={house:'',wallbox:''},previewTimes={house:0,wallbox:0};
 function meterFamily(role='house'){return role==='house'&&$('config-form').elements.house_meter_type.value==='tasmota'?'tasmota':'shelly';}
-function previewRequest(role='house'){const f=$('config-form').elements;return role==='wallbox'?{role,host:f.wallbox_meter_host.value.trim(),type:f.wallbox_meter_type.value,path:''}:{role,host:f.house_meter_host.value.trim(),type:f.house_meter_type.value,path:f.house_power_path.value.trim()};}
+function previewRequest(role='house'){const f=$('config-form').elements;return role==='wallbox'?{role,host:f.wallbox_meter_host.value.trim(),type:f.wallbox_meter_type.value,path:'',unit_id:1}:{role,host:f.house_meter_host.value.trim(),type:f.house_meter_type.value,path:f.house_meter_type.value==='em24_tcp'?'':f.house_power_path.value.trim(),unit_id:f.house_meter_type.value==='em24_tcp'?Number(f.house_address.value):1};}
 function scanUi(role){return role==='wallbox'?{button:$('wallbox-meter-scan'),status:$('wallbox-meter-scan-status'),select:$('wallbox-meter-found')}:{button:$('meter-scan'),status:$('meter-scan-status'),select:$('meter-found')};}
 function previewUi(role){return role==='wallbox'?{box:$('wallbox-preview'),host:$('wallbox-preview-host'),value:$('wallbox-preview-value'),state:$('wallbox-preview-state')}:{box:$('house-preview'),host:$('house-preview-host'),value:$('house-preview-value'),state:$('house-preview-state')};}
 
@@ -277,7 +277,8 @@ $('sessions-next').addEventListener('click',()=>{if(sessionOffset+20<sessionCoun
 $('session-csv').href=`/api/export.csv?${sessionQuery()}`;
 
 function shellPinChoices(values,field){
-  const occupied=new Map([[4,'Wallbox-Zähler TX'],[5,'Wallbox-Zähler RX']]);
+  const occupied=new Map();
+  if(!['shelly_gen2','shelly_em1'].includes(values.wallbox_meter_type)){occupied.set(4,'Wallbox-Zähler TX');occupied.set(5,'Wallbox-Zähler RX');}
   if(['xemex','sdm630','sdm630mct'].includes(values.house_meter_type)){occupied.set(43,'Hauszähler TX');occupied.set(44,'Hauszähler RX');}
   if(values.external_mode_input_enabled)occupied.set(6,'Betriebsart-Kontakt');
   if(values.evu_input_enabled)occupied.set(7,'EVU-Kontakt');
@@ -288,7 +289,7 @@ function shellPinChoices(values,field){
   return [1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,21,38,39,40,41,42,43,44,47].map(pin=>({pin,reason:occupied.get(pin)||''}));
 }
 function updateShellPins(){
-  const f=$('config-form').elements,values={house_meter_type:f.house_meter_type.value};
+  const f=$('config-form').elements,values={house_meter_type:f.house_meter_type.value,wallbox_meter_type:f.wallbox_meter_type.value};
   for(const key of ['external_mode_input_enabled','evu_input_enabled','relay_board_enabled','phase_switch_enabled','phase_feedback_enabled'])values[key]=f[key].checked;
   values.wallbox_tx_pin=Number(f.wallbox_tx_pin.value||17);values.wallbox_rx_pin=Number(f.wallbox_rx_pin.value||18);
   let conflict=false;
@@ -338,9 +339,9 @@ function updateEquipment(){const f=$('config-form').elements,checked=name=>f[nam
 
  $('huawei-settings').hidden=!checked('huawei_enabled');
  if(f.house_meter_type.value==='huawei'){$('house-host-field').hidden=true;}
- const network=['tasmota','shelly_gen2','shelly_em1'].includes(f.house_meter_type.value);
+ const network=['tasmota','shelly_gen2','shelly_em1','em24_tcp'].includes(f.house_meter_type.value);
  const networkWallbox=f.wallbox_meter_type.value.startsWith('shelly_');
- const threePhaseHouse=['xemex','sdm630','sdm630mct','shelly_gen2','huawei'].includes(f.house_meter_type.value);
+ const threePhaseHouse=['xemex','sdm630','sdm630mct','shelly_gen2','huawei','em24_tcp'].includes(f.house_meter_type.value);
  $('house-host-field').hidden=!network;$('house-http-settings').hidden=!expert||f.house_meter_type.value!=='tasmota';
  $('house-shelly-modbus-note').hidden=!f.house_meter_type.value.startsWith('shelly_');
  $('wallbox-network-settings').hidden=!networkWallbox;
@@ -371,7 +372,7 @@ $('config-form').addEventListener('change',e=>{
  if(name==='huawei_pv'&&f.huawei_pv.checked){f.huawei_enabled.checked=true;f.pv_display_enabled.checked=true;}
  if(name==='battery_protect'&&f.battery_protect.checked){if(!(f.huawei_enabled.checked&&f.huawei_battery.checked))f.mqtt_enabled.checked=true;f.zero_feed_enabled.checked=true;if(Number(f.zero_reserve_w.value)>0)f.zero_reserve_w.value='0';}
  if(name==='grid_guard_enabled'&&f.grid_guard_enabled.checked){
-  const supported=['xemex','sdm630','sdm630mct','shelly_gen2','huawei'].includes(f.house_meter_type.value);
+  const supported=['xemex','sdm630','sdm630mct','shelly_gen2','huawei','em24_tcp'].includes(f.house_meter_type.value);
   if(!supported){f.grid_guard_enabled.checked=false;toast('Hausanschlussschutz benötigt drei gemessene Phasenströme.',true);}
  }
  if(['vehicle_soc_enabled','homeassistant_enabled'].includes(name)&&f[name].checked)f.mqtt_enabled.checked=true;
@@ -405,7 +406,7 @@ async function action(work){if(busy||!online)return;busy=true;writes();try{await
 
 
 
-function updateMeterFields(){const f=$('config-form').elements,type=f.wallbox_meter_type.value,house=f.house_meter_type.value;$('coil-settings').hidden=type!=='xemex';$('meter-profile-note').textContent=type==='xemex'?'Xemex: hier geprüft · normalerweise 9600 Baud / 8E1.':type==='sdm630'||type==='sdm630mct'?'SDM630-Familie: Register laut Herstellerprotokoll geprüft · vor Ort noch nicht getestet.':type==='sdm230'||type==='sdm120'?'Einphasiger Eastron: Register laut Herstellerprotokoll geprüft; Strom und Leistung werden für symmetrisches dreiphasiges Laden × 3 gerechnet.':type==='shelly_gen2'?'Shelly 3EM: Strom und Wirkleistung werden jede Sekunde per Modbus TCP gelesen. Modbus muss im Shelly aktiviert sein.':type==='shelly_em1'?'Shelly EM: Eine gemessene Phase wird per Modbus TCP gelesen und auf die aktiven Ladephasen hochgerechnet.':'Zählerprofil auswählen.';$('house-bus-settings').hidden=!['xemex','sdm630','sdm630mct'].includes(house);}
+function updateMeterFields(){const f=$('config-form').elements,type=f.wallbox_meter_type.value,house=f.house_meter_type.value;$('coil-settings').hidden=type!=='xemex';$('meter-profile-note').textContent=type==='xemex'?'Xemex: hier geprüft · normalerweise 9600 Baud / 8E1.':type==='sdm630'||type==='sdm630mct'?'SDM630-Familie: Register laut Herstellerprotokoll geprüft · vor Ort noch nicht getestet.':type==='sdm230'||type==='sdm120'?'Einphasiger Eastron: Register laut Herstellerprotokoll geprüft; Strom und Leistung werden für symmetrisches dreiphasiges Laden × 3 gerechnet.':type==='shelly_gen2'?'Shelly 3EM: Strom und Wirkleistung werden jede Sekunde per Modbus TCP gelesen. Modbus muss im Shelly aktiviert sein.':type==='shelly_em1'?'Shelly EM: Eine gemessene Phase wird per Modbus TCP gelesen und auf die aktiven Ladephasen hochgerechnet.':'Zählerprofil auswählen.';const serialHouse=['xemex','sdm630','sdm630mct'].includes(house);$('house-bus-settings').hidden=!serialHouse;$('house-unit-field').hidden=!serialHouse&&house!=='em24_tcp';}
 function updateExpertMode(){const f=$('config-form').elements,expert=f.basic_mode.value!=='true';document.documentElement.dataset.expert=String(expert);document.querySelectorAll('[data-expert-option]').forEach(option=>{option.hidden=!expert&&option.value!==option.parentElement.value;option.disabled=!expert&&option.value!==option.parentElement.value;});updateEquipment();}
 
 $('config-form').elements.wallbox_meter_type.addEventListener('change',()=>{const f=$('config-form').elements;f.meter_baud.value='9600';f.meter_format.value=f.wallbox_meter_type.value==='xemex'?'1':'0';updateMeterFields();updateEquipment();});
@@ -416,14 +417,16 @@ function modbusDefaults(bus){const f=$('config-form').elements;return bus==='met
 function updateModbus(){const f=$('config-form').elements;for(const bus of ['meter','house']){let changed=false;for(const [key,value] of Object.entries(modbusDefaults(bus))){const el=f[key],different=Number(el.value)!==value;el.classList.toggle('modified-setting',different);el.setAttribute('aria-description',different?'Vom Modbus-Standard abweichend':'Modbus-Standard');changed||=different;}$(bus+'-modbus-note').hidden=!changed;}}
 for(const bus of ['meter','house'])$(bus+'-modbus-reset').addEventListener('click',()=>{const f=$('config-form').elements;for(const [key,value] of Object.entries(modbusDefaults(bus)))f[key].value=String(value);updateModbus();toast('Modbus-Standard eingesetzt. Zum Übernehmen speichern.');});
 function updateHouseQuery(){const f=$('config-form').elements,type=f.house_meter_type.value;
- const isTasmota=type==='tasmota',isShelly=type.startsWith('shelly_'),network=isTasmota||isShelly;
+ const isTasmota=type==='tasmota',isShelly=type.startsWith('shelly_'),isEm24=type==='em24_tcp',network=isTasmota||isShelly||isEm24;
  const path=isTasmota?'/cm?cmnd=Status%2010':'',override=f.house_power_path.value.trim(),host=f.house_meter_host.value.trim();
- $('meter-discovery').hidden=!network;$('house-endpoint').hidden=!network;$('house-preview').hidden=!network;
+ $('meter-discovery').hidden=!(isTasmota||isShelly);$('house-endpoint').hidden=!network;$('house-preview').hidden=!network;
+ $('house-em24-note').hidden=!isEm24;
+ $('house-host-label').textContent=isEm24?'EM24 IP-Adresse oder Hostname':'Adresse manuell eintragen';f.house_meter_host.placeholder=isEm24?'Zum Beispiel 192.168.178.20 oder em24.local':'Nur nötig, wenn die Suche nichts findet';
  $('meter-scan').textContent=type==='tasmota'?'Tasmota / Wattwächter im Heimnetz suchen':'Shelly-Zähler im Heimnetz suchen';
  if(scanTarget!=='house'||scanFamily!==meterFamily('house')){$('meter-found').hidden=true;$('meter-scan-status').textContent=meterScanning?'Vorherige Suche wird beendet …':'';}
  const key=JSON.stringify(previewRequest('house'));if(key!==previewKeys.house){$('house-preview-value').textContent='—';$('house-preview-state').textContent=host?'Messwert wird geprüft …':'Zähler auswählen oder IP eingeben.';}
  $('house-preview-host').textContent=host;
- $('house-endpoint').textContent=isShelly?(host?'Modbus TCP: '+host+':502':'IP-Adresse eingeben oder Zähler suchen.'):(path?(override.startsWith('http://')||override.startsWith('https://')?'Abfrage: '+override:host?'Abfrage: http://'+host+path:'IP-Adresse eingeben oder Zähler suchen.'):'');
+ $('house-endpoint').textContent=isEm24?(host?'Modbus TCP: '+(host.includes(':')?host:host+':502')+' · Adresse '+f.house_address.value:'EM24-IP-Adresse eingeben.'):isShelly?(host?'Modbus TCP: '+host+':502':'IP-Adresse eingeben oder Zähler suchen.'):(path?(override.startsWith('http://')||override.startsWith('https://')?'Abfrage: '+override:host?'Abfrage: http://'+host+path:'IP-Adresse eingeben oder Zähler suchen.'):'');
  $('house-query-help').textContent=isTasmota?'Automatisch: Wattwächter E320 oder Tasmota ENERGY. Eigene Datenfelder nur bei abweichendem Zählerskript nötig.':type==='shelly_em1'?'Modbus TCP liest die Wirkleistung von Kanal 0. Dieser einzelne Kanal wird am Hausanschluss nicht hochgerechnet.':'Modbus TCP liest Gesamtwirkleistung und alle drei Phasenströme.';
 }
 function updateWallboxQuery(){const f=$('config-form').elements,network=f.wallbox_meter_type.value.startsWith('shelly_'),host=f.wallbox_meter_host.value.trim(),ui=previewUi('wallbox');
@@ -451,8 +454,8 @@ async function pollMeterPreview(){
   if(!online||!initialized||busy||uploading||document.hidden||$('settings').hidden||meterScanning||window.teennetFeatures?.networkBusy())return;
   if(previewRunning){
    const result=await api('/api/meters/preview',undefined,5000);previewRunning=result.running;const role=result.role||previewRole,request=previewRequest(role),key=JSON.stringify(request),ui=previewUi(role);
-   if(JSON.stringify({role:result.role,host:result.host,type:result.type,path:result.path})!==key)return;
-   if(!result.running){ui.value.textContent=result.ok?`${format(Math.abs(result.watts)/1000,2)} kW`:'—';ui.state.textContent=result.ok?role==='wallbox'?`Ladeleistung · vor ${Math.round(result.age_ms/1000)} s gemessen · Vorschau`:`${result.watts<0?'Einspeisung':result.watts>0?'Bezug':'Kein Leistungsfluss'} · vor ${Math.round(result.age_ms/1000)} s gemessen · Vorschau`:'Kein gültiger Messwert. Bei Shelly Modbus TCP, Modell, IP und Verbindung prüfen.';}
+   if(JSON.stringify({role:result.role,host:result.host,type:result.type,path:result.path,unit_id:result.unit_id??1})!==key)return;
+   if(!result.running){ui.value.textContent=result.ok?`${format(Math.abs(result.watts)/1000,2)} kW`:'—';ui.state.textContent=result.ok?role==='wallbox'?`Ladeleistung · vor ${Math.round(result.age_ms/1000)} s gemessen · Vorschau`:`${result.watts<0?'Einspeisung':result.watts>0?'Bezug':'Kein Leistungsfluss'} · vor ${Math.round(result.age_ms/1000)} s gemessen · Vorschau`:request.type==='em24_tcp'?'Kein gültiger EM24-Wert. IP, Port, Modbus-Adresse und Verbindung prüfen.':'Kein gültiger Messwert. Bei Shelly Modbus TCP, Modell, IP und Verbindung prüfen.';}
    return;
   }
   const roles=previewTurn++%2?['wallbox','house']:['house','wallbox'];let selected=null;

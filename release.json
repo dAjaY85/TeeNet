@@ -1,33 +1,28 @@
 {
-  "version": "1.10",
-  "build_id": "8167df394ad2",
+  "version": "1.11",
+  "build_id": "e531cc2efe09",
   "schema": 25,
   "hardware": "ESP32-S3 N16R8 \u00b7 Shell Recharge Advanced 3.0",
   "files": [
     {
-      "name": "TeeNet-1.10-ota.bin",
-      "bytes": 1960400,
-      "sha256": "3971a29fb3c732f57d8491149c411aab6251acd8e74b8ada32a77104d6019fbc",
-      "url": "https://teennet-demo.stetastic.chatgpt.site/downloads/TeeNet-1.10-ota.bin"
+      "name": "TeeNet-1.11-ota.bin",
+      "bytes": 1966384,
+      "sha256": "a6e75ae27a7ca0cafc6bcc6d481063ada16e0200c20ec355ff38047dd019ba5c"
     },
     {
-      "name": "TeeNet-1.10-usb.zip",
-      "bytes": 1317994,
-      "sha256": "14cda997960c48412c57296b49ea2f3da574baca4bc2f5f388d01cbc83138f93",
-      "url": "https://teennet-demo.stetastic.chatgpt.site/downloads/TeeNet-1.10-usb.zip"
+      "name": "TeeNet-1.11-usb.zip",
+      "bytes": 1320856,
+      "sha256": "f77aa272cf059cdb0311b4237c6ceeeb869e3843da349efcbba6f51154d1f213"
     },
     {
-      "name": "TeeNet-1.10-source.zip",
-      "bytes": 665371,
-      "sha256": "af83cb707ff0c66c8b0709979bc748190d9ce8059f798e4a47cbfdff6224236d",
-      "url": "https://teennet-demo.stetastic.chatgpt.site/downloads/TeeNet-1.10-source.zip"
+      "name": "TeeNet-1.11-source.zip",
+      "bytes": 669049,
+      "sha256": "16c861427f0edea724e33abab6db1a8269a79009b4f133a9a6931c2ec6cc6abe"
     },
     {
-      "name": "TeeNet-1.10-factory.bin",
+      "name": "TeeNet-1.11-factory.bin",
       "bytes": 2236416,
-      "sha256": "37c4d6457a1feeb95ad69f18f200c5e49bedb1cfe0a59ef41cb93aff3944c64c",
-      "url": "https://teennet-demo.stetastic.chatgpt.site/downloads/TeeNet-1.10-factory.bin"
+      "sha256": "94cbf01724928d1ca2c8e51bf76dd50429b9e7d9038c3278e4d2bfdae1f951fb"
     }
-  ],
-  "download_page": "https://teennet-demo.stetastic.chatgpt.site/downloads"
+  ]
 }

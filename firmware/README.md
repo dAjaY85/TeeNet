@@ -1,7 +1,7 @@
-# TeeNet 1.10
+# TeeNet 1.11
 
 Steuerung für Shell Recharge Advanced 3.0 mit ESP32-S3 N16R8 (16 MB Flash).
-Build: 8167df394ad2. Dieser Quellstand entspricht der angebotenen Firmware.
+Build: e531cc2efe09. Dieser Quellstand entspricht der angebotenen Firmware.
 
 ## Bauen
 
@@ -22,6 +22,19 @@ Mit Wallbox-EMS-Setup verbinden, 192.168.4.1 öffnen und den Assistenten nutzen.
 Anleitung und Anschlussplan: main/guide.html und main/hardware-plan.svg.
 Shell: TX17/RX18; Wallbox-Zähler: TX4/RX5; automatische 3,3-V-RS485-Module.
 Optional GPIO12/14 Relais, GPIO13 Rückmeldung, GPIO6 Modus, GPIO7 EVU.
+
+## EM24-E1 und AtomS3 Lite
+
+EM24-E1 am Hausanschluss: Modbus TCP, Port 502, Adresse 1; drei Phasenströme
+und Gesamtwirkleistung. Ein separater Zähler am Wallbox-Abgang bleibt nötig.
+EM24 und AtomS3 sind softwareseitig geprüft, der Hardwaretest steht noch aus.
+Bei einem Shelly-Wallbox-Zähler über Modbus TCP werden GPIO4/5 frei:
+Atomic RS485 Base mit Shell TX6/RX5; den GPIO6-Betriebsartkontakt ausschalten.
+Der AtomS3 Lite benötigt einen eigenen Build mit 8 MB Flash. Dieses Paket ist
+für N16R8 / 16 MB. Auf Atom zunächst nur die benötigten Grundfunktionen nutzen.
+Nicht benötigte Relais, Kontakte, Hausakku, Huawei und Anzeigen deaktivieren.
+PSRAM ist in diesem Build nicht aktiviert; Abschalten von Optionen verkleinert
+die Firmwaredatei nicht, reduziert aber die tatsächlich laufenden Aufgaben.
 
 ## Hinweis
 

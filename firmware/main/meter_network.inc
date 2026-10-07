@@ -70,19 +70,7 @@ static int tcp_connect_timeout(const char *source,uint16_t default_port,int time
 
 #include "bounded_socket.inc"
 
-static bool modbus_tcp_read_input(const char *host,uint16_t start,uint16_t count,uint8_t *data,size_t capacity,int timeout_ms) {
-    if(!host || !data || !count || count>125 || capacity<(size_t)count*2)return false;
-    int sock=tcp_connect_timeout(host,502,timeout_ms);if(sock<0)return false;
-    uint16_t transaction=(uint16_t)esp_random();
-    uint8_t request[12]={transaction>>8,transaction&255,0,0,0,6,1,4,start>>8,start&255,count>>8,count&255};
-    int64_t deadline=now_ms()+timeout_ms;
-    uint8_t header[9];bool ok=socket_exact(sock,request,sizeof(request),true,deadline) && socket_exact(sock,header,sizeof(header),false,deadline);
-    size_t bytes=(size_t)count*2;
-    ok=ok && header[0]==request[0] && header[1]==request[1] && header[2]==0 && header[3]==0 &&
-        header[4]==0 && header[5]==bytes+3 && header[6]==1 && header[7]==4 && header[8]==bytes &&
-        socket_exact(sock,data,bytes,false,deadline);
-    close(sock);return ok;
-}
+#include "meter_tcp.inc"
 
 static bool read_shelly_modbus(const char *host,const char *type,shelly_modbus_reading_t *reading,int timeout_ms) {
     if(!strcmp(type,"shelly_gen2")){

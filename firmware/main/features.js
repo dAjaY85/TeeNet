@@ -175,7 +175,7 @@
     if(wizardCompleted){closeWizard();location.hash='overview';return;}
     const f=$('config-form').elements,active=selectedSteps(),step=active[wizardStep];
     for(const id of step.groups){const group=$(id);for(const field of group.querySelectorAll('input,select')){if(field.type!=='file'&&field.getClientRects().length&&field.willValidate&&!field.checkValidity()){field.reportValidity();return;}}}
-    if(step.groups.includes('house-settings')&&f.zero_feed_enabled.checked){const type=f.house_meter_type.value;if(type==='xemex'){toast('Xemex kann den Stromschutz übernehmen; für PV eine Quelle mit Energierichtung wählen.',true);return;}if(['tasmota','shelly_gen2','shelly_em1'].includes(type)&&!f.house_meter_host.value.trim()){toast('Hauszähler suchen oder seine Adresse eintragen.',true);return;}}
+    if(step.groups.includes('house-settings')&&f.zero_feed_enabled.checked){const type=f.house_meter_type.value;if(type==='xemex'){toast('Xemex kann den Stromschutz übernehmen; für PV eine Quelle mit Energierichtung wählen.',true);return;}if(['tasmota','shelly_gen2','shelly_em1','em24_tcp'].includes(type)&&!f.house_meter_host.value.trim()){toast('Hauszähler suchen oder seine Adresse eintragen.',true);return;}}
     if(step.groups.includes('mqtt-settings')&&f.huawei_enabled.checked&&(!f.huawei_host.value.trim()||!Number.isInteger(Number(f.huawei_unit_id.value)))){toast('Huawei suchen oder Adresse und Modbus-Adresse eintragen.',true);return;}
     if(step.groups.includes('mqtt-settings')&&f.mqtt_enabled.checked&&!/^mqtts?:\/\//.test(f.mqtt_uri.value)){toast('MQTT-Broker eintragen oder MQTT ausschalten.',true);return;}
     if(wizardStep===active.length-1){

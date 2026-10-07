@@ -1,4 +1,4 @@
-# TeeNet 1.10
+# TeeNet 1.11
 
 Lokale ESP32-S3-Steuerung für die **Shell Recharge Advanced 3.0**.
 
@@ -7,7 +7,7 @@ Lokale ESP32-S3-Steuerung für die **Shell Recharge Advanced 3.0**.
 ## Funktionen
 
 - Manuell laden oder PV-Überschuss nutzen; webbasierte Einrichtung und Bedienung.
-- MQTT für ioBroker und Home Assistant; je nach Hardware Shelly, Tasmota/Wattwächter, Xemex, Eastron oder Huawei Modbus TCP.
+- MQTT für ioBroker und Home Assistant; je nach Hardware Shelly, Tasmota/Wattwächter, Xemex, Eastron oder Huawei und EM24-E1 Modbus TCP.
 - Optionale Hausakku-Nutzung, Wolkenpuffer, Ladeplan und Phasenumschaltung.
 - Verbrauch, Sitzungen, getrennte Netz-/Solarkosten, CSV-Export und OTA-Updates.
 - Ein gemeinsamer Start/Stopp-Knopf und eine dauerhaft sichtbare Statuszeile.
@@ -15,6 +15,12 @@ Lokale ESP32-S3-Steuerung für die **Shell Recharge Advanced 3.0**.
 - Diagnoseprotokoll und Firmwareprüfung; begrenzte Netzwerkabfragen entlasten den ESP.
 
 Der USB-Webinstaller dient der Erstinstallation und löscht vorhandene Daten. Eingerichtete Geräte per OTA aktualisieren. Die Online-Demo arbeitet ohne Hardware.
+
+## Neu in 1.11
+
+EM24-E1 als Hausanschlusszähler über Modbus TCP: drei Phasenströme und Gesamtwirkleistung. GPIO4/5 werden freigegeben, wenn der Wallbox-Zähler über Shelly Modbus TCP verbunden ist; damit lässt sich Shell RX auf GPIO5 einstellen. Atomic RS485 Base: TX6/RX5, ohne gleichzeitigen Betriebsartkontakt auf GPIO6.
+
+Ein separater Zähler am Wallbox-Abgang bleibt erforderlich. EM24 und AtomS3 Lite sind noch nicht an echter Hardware geprüft; Tests und Feedback sind willkommen. Die Download-Binärdateien sind für N16R8 / 16 MB Flash. AtomS3 Lite benötigt einen eigenen 8-MB-Build. Zunächst nur erforderliche Funktionen aktivieren; ungenutzte Erweiterungen deaktivieren.
 
 ## Hardware
 
