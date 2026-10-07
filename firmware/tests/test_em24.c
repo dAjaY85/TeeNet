@@ -1,5 +1,6 @@
 #include "em24_modbus.h"
 #include "ems_core.h"
+#include "shelly_modbus.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -9,6 +10,7 @@ static int64_t elapsed;
 static int connect_cost,io_cost=1,corrupt,connects,closes;
 static uint8_t request[12];
 static unsigned expected_unit=7;
+static bool sample_data;
 static int64_t now_ms(void){return elapsed;}
 static uint32_t esp_random(void){return 0x1234;}
 static int tcp_connect_timeout(const char *host,uint16_t port,int timeout){
@@ -31,9 +33,26 @@ static bool socket_exact(int fd,uint8_t *data,size_t length,bool write,int64_t d
         memcpy(data,header,9);return true;
     }
     if(corrupt==7)return false;
-    assert(length==count*2);memset(data,0,length);return true;
+    assert(length==count*2);memset(data,0,length);
+    if(sample_data){
+        const uint8_t current[]={0x1f,0xa4,0,0,0x30,0x39,0,0,0xfd,0xe8,0,0};
+        const uint8_t power[]={0xab,0x40,0,1};
+        if(request[9]==EM24_CURRENT_START)memcpy(data,current,sizeof(current));
+        else memcpy(data,power,sizeof(power));
+    }
+    return true;
 }
 #include "meter_tcp.inc"
+
+static settings_t settings;
+static bool wifi_online=true;
+#define LOCK() do {} while(0)
+#define UNLOCK() do {} while(0)
+static bool read_shelly_modbus(const char *host,const char *type,shelly_modbus_reading_t *reading,int timeout){
+    (void)host;(void)type;(void)reading;(void)timeout;
+    assert(!"EM24 must not use the Shelly decoder");return false;
+}
+#include "wallbox_network.inc"
 
 static void near(float a,float b){assert(fabsf(a-b)<.001f);}
 int main(void){
@@ -75,6 +94,21 @@ int main(void){
     assert(settings_shell_pin_available(&s,5,false));assert(settings_valid(&s));
     s.external_mode_input_enabled=true;assert(!settings_valid(&s));
     s.external_mode_input_enabled=false;strcpy(s.wallbox_meter_type,"xemex");assert(!settings_valid(&s));
+    strcpy(s.wallbox_meter_type,"em24_tcp");s.xemex_address=7;
+    assert(settings_valid(&s));assert(settings_shell_pin_available(&s,5,false));
+    s.wallbox_meter_host[0]=0;assert(!settings_valid(&s));strcpy(s.wallbox_meter_host,"em24:1502");
+    s.xemex_address=0;assert(!settings_valid(&s));s.xemex_address=248;assert(!settings_valid(&s));s.xemex_address=7;
+    settings=s;settings.house_address=9;settings.charge_phases=3;
+    elapsed=0;io_cost=1;sample_data=true;float feedback[3]={-1,-1,-1},watts=-1;
+    assert(read_wallbox_network(feedback,&watts));
+    near(feedback[0],8.1f);near(feedback[1],12.345f);near(feedback[2],65);near(watts,10937.6f);
+    settings.charge_phases=1;
+    assert(read_wallbox_network(feedback,&watts));
+    near(feedback[0],8.1f);near(feedback[1],0);near(feedback[2],0);near(watts,10937.6f);
+    corrupt=7;assert(!read_wallbox_network(feedback,&watts));near(watts,10937.6f);
+    corrupt=0;wifi_online=false;int previous_connects=connects;
+    assert(!read_wallbox_network(feedback,&watts));assert(connects==previous_connects);
+    assert(connects==closes);
     puts("PASS: EM24 word order, import/export, overflow, MBAP identity, shared timeout, 3-phase guard and conditional GPIO5 reservation");
     return 0;
 }

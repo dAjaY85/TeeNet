@@ -1,28 +1,28 @@
 {
-  "version": "1.11",
-  "build_id": "e531cc2efe09",
+  "version": "1.12",
+  "build_id": "4f4aef6ded31",
   "schema": 25,
   "hardware": "ESP32-S3 N16R8 \u00b7 Shell Recharge Advanced 3.0",
   "files": [
     {
-      "name": "TeeNet-1.11-ota.bin",
-      "bytes": 1966384,
-      "sha256": "a6e75ae27a7ca0cafc6bcc6d481063ada16e0200c20ec355ff38047dd019ba5c"
+      "name": "TeeNet-1.12-ota.bin",
+      "bytes": 1958208,
+      "sha256": "4ec6de246cd76a9ec81719e9511394bcbbe1a7f4606bf45ba2fdb37921f5ef69"
     },
     {
-      "name": "TeeNet-1.11-usb.zip",
-      "bytes": 1320856,
-      "sha256": "f77aa272cf059cdb0311b4237c6ceeeb869e3843da349efcbba6f51154d1f213"
+      "name": "TeeNet-1.12-usb.zip",
+      "bytes": 1315247,
+      "sha256": "cdc1a65de29ef64d421cde8bbb6a8bd7e0685ed31019f7d0451fd026e8ae8ad7"
     },
     {
-      "name": "TeeNet-1.11-source.zip",
-      "bytes": 669049,
-      "sha256": "16c861427f0edea724e33abab6db1a8269a79009b4f133a9a6931c2ec6cc6abe"
+      "name": "TeeNet-1.12-source.zip",
+      "bytes": 666533,
+      "sha256": "91797d085df310f0be8d83154219771abc0514fd07a5d5fd1c5e306acd3fcc3d"
     },
     {
-      "name": "TeeNet-1.11-factory.bin",
+      "name": "TeeNet-1.12-factory.bin",
       "bytes": 2236416,
-      "sha256": "94cbf01724928d1ca2c8e51bf76dd50429b9e7d9038c3278e4d2bfdae1f951fb"
+      "sha256": "df3d81ad0d5bb5c8e24a5e1008d906d75343f3e77bedf631f455495615852d26"
     }
   ]
 }

@@ -6,18 +6,19 @@
   reasons.plan_clock='Ladeplan wartet auf eine gültige Internetzeit.';
   let eventsBusy=false,eventRows=[],persistedRows=[],wizardCompleted=false,wizardStep=-1,wizardActive=[],planWasActive=false,wizardGroups=[],wizardOptions=[],huaweiSearching=false,huaweiChecking=false,huaweiDevices=[];
   const steps=[
-    {title:'Funktionen auswählen',groups:['equipment-settings'],help:'Nur manuell oder per MQTT laden? Wähle Grundfunktionen. Für PV-Laden oder zusätzliche Hardware wähle die Erweiterungen.'},
-    {title:'WLAN einrichten',groups:['connection-settings'],help:'Verbinde TeeNet zuerst mit deinem Heimnetz. Wenn das WLAN bereits verbunden ist, kannst du direkt weitergehen.'},
-    {title:'Datenquellen verbinden',groups:['mqtt-settings'],help:'Für eine externe Leistungsvorgabe verbinde ioBroker oder Home Assistant über MQTT. Bei rein manueller Bedienung ist MQTT optional.'},
-    {title:'Wallbox-Zähler',groups:['meter-settings'],help:'Wähle den Zähler am Wallbox-Abgang. RS485-Modul 1 verbindet die Shell, Modul 2 den Wallbox-Zähler. Bei Shelly Modbus TCP aktivieren.'},
-    {title:'Hausanschluss und PV',groups:['house-settings'],when:f=>!isBasic(f)&&(f.zero_feed_enabled.checked||f.grid_guard_enabled.checked),help:'Soll PV-Überschussladen genutzt werden? Wähle dafür den Hauszähler. Huawei liest den Smart Power Sensor; serielle Hauszähler benötigen einen eigenen zusätzlichen Bus.'},
-    {title:'Hausakku einstellen',groups:['battery-settings'],when:f=>f.battery_protect.checked,help:'Wie weit darf der Hausakku entladen werden? Lege die Entladegrenze und die erlaubten Leistungen für Wolkenpuffer und Auto aus Hausakku fest. Die Nutzung schaltest du später in der Übersicht ein.'},
-    {title:'Preise und Leistung',groups:['consumption-settings'],help:'Trage die Spannung und deine aktuellen Netz- und Solartarife ein. Alte Ladesitzungen behalten ihre damaligen Preise.'},
-    {title:'Fahrzeug-Akkuanzeige',groups:['vehicle-settings'],when:f=>f.vehicle_soc_enabled.checked,help:'Richte den Fahrzeug-Ladezustand in deiner Zentrale ein. Die verlinkte Anleitung zeigt die nötigen Schritte.'},
-    {title:'Externe Kontakte',groups:['hardware-settings'],when:f=>f.external_mode_input_enabled.checked||f.evu_input_enabled.checked,help:'Prüfe Betriebsart- und EVU-Kontakt. Ein aktiver EVU-Kontakt darf stoppen oder begrenzen.'},
-    {title:'Relaisboard',groups:['relay-settings'],when:f=>f.relay_board_enabled.checked,help:'Wähle die Schaltlogik und die Aufgabe der Relais. Die Phasenumschaltung erst nach Aufbau und Prüfung aktivieren.'},
-    {title:'Sicherung, Update und Hilfe',groups:['maintenance'],help:'Hier kannst du eine Sicherung herunterladen und die Anleitung öffnen. Ein aktivierter Ladeplan erscheint unter „Laden“, sobald PV-Überschussladen gewählt ist; dort legst du Ladeziel und Endzeit fest. Für die Einrichtung sind weder Update noch Werksreset nötig.'},
-    {title:'Abschlussprüfung',groups:['diagnostic-settings'],help:'Prüfe Wallbox, Zähler, Uhrzeit und alle gewählten Datenquellen. Danach die Einrichtung speichern. Der Assistent startet keine Ladung.'}
+    {title:'Funktionen auswählen',groups:['equipment-settings'],help:'Grundfunktionen für Manuell und MQTT. Zusatzfunktionen für PV und Erweiterungen.'},
+    {title:'WLAN einrichten',groups:['connection-settings'],help:'Heimnetz wählen und Passwort speichern. Bereits verbunden? Weiter.'},
+    {title:'Datenquellen verbinden',groups:['mqtt-settings'],help:'Für ioBroker oder Home Assistant den MQTT-Broker eintragen. Sonst überspringen.'},
+    {title:'Shell-Wallbox',groups:['shell-settings'],help:'Shell suchen und ihre Stromgrenzen übernehmen. Ohne Netzwerk die Werte aus der Shell-Einstellung eintragen.'},
+    {title:'Wallbox-Zähler',groups:['meter-settings'],help:'Separaten Zähler am Wallbox-Abgang auswählen und Messwerte prüfen.'},
+    {title:'Hausanschluss und PV',groups:['house-settings'],when:f=>!isBasic(f)&&(f.zero_feed_enabled.checked||f.grid_guard_enabled.checked),help:'Hauszähler auswählen und Netzbezug sowie Einspeisung prüfen.'},
+    {title:'Hausakku einstellen',groups:['battery-settings'],when:f=>f.battery_protect.checked,help:'Entladegrenze und Leistung festlegen. Die Nutzung später in der Übersicht einschalten.'},
+    {title:'Preise und Leistung',groups:['consumption-settings'],help:'Spannung und aktuelle Preise eintragen. Bisherige Kosten bleiben erhalten.'},
+    {title:'Fahrzeug-Akkuanzeige',groups:['vehicle-settings'],when:f=>f.vehicle_soc_enabled.checked,help:'Fahrzeug-Ladezustand per MQTT senden. Anleitung unten öffnen.'},
+    {title:'Externe Kontakte',groups:['hardware-settings'],when:f=>f.external_mode_input_enabled.checked||f.evu_input_enabled.checked,help:'Kontakte prüfen und die EVU-Grenze festlegen.'},
+    {title:'Relaisboard',groups:['relay-settings'],when:f=>f.relay_board_enabled.checked,help:'Schaltlogik und Relaisaufgaben wählen. Phasenumschaltung erst nach Anschlussprüfung aktivieren.'},
+    {title:'Sicherung, Update und Hilfe',groups:['maintenance'],help:'Einstellungen sichern. Updates und Hilfe findest du später ebenfalls hier.'},
+    {title:'Abschlussprüfung',groups:['diagnostic-settings'],help:'Verbindungen prüfen und speichern. Die Ladung anschließend in der Übersicht starten.'}
   ];
   const isBasic=f=>f.basic_mode.value==='true';
   const selectedSteps=()=>{const f=$('config-form').elements;return steps.filter(step=>(!isBasic(f)||!['battery-settings','vehicle-settings','hardware-settings','relay-settings'].some(id=>step.groups.includes(id)))&&(!step.when||step.when(f)));};
@@ -75,8 +76,8 @@
     $('plan-start').disabled=!online||busy||!state?.zero_feed_enabled||!!state?.external_mode_input_enabled||!state?.clock_ok;
     $('plan-resume').hidden=!p.active||p.phase!=='paused';$('plan-cancel').hidden=!p.active;
     if(p.active&&!planWasActive)$('plan-panel').open=true;planWasActive=!!p.active;
-    if(!p.active&&!state?.zero_feed_enabled)$('plan-status').textContent='Für den Ladeplan zuerst einen Hauszähler für PV einrichten.';
-    else if(state?.external_mode_input_enabled)$('plan-status').textContent='Ladeplan ist mit dem externen Betriebsart-Kontakt nicht verfügbar.';
+    if(!p.active&&!state?.zero_feed_enabled)$('plan-status').textContent='Für den Ladeplan einen Hauszähler einrichten.';
+    else if(state?.external_mode_input_enabled)$('plan-status').textContent='Ladeplan und Betriebsart-Kontakt sind nicht gleichzeitig nutzbar.';
     const f=$('config-form').elements;
     const auto=f.shell_limits_auto.checked,ready=auto&&state?.shell_limits_auto&&state?.shell_limits_ok;
     $('shell-manual-limits').hidden=!!ready;$('shell-address').hidden=!auto;
@@ -146,7 +147,7 @@
       const label=document.createElement('span'),status=document.createElement('b');label.textContent=check.name;status.textContent=check.ok?'Bereit':'Prüfen';row.append(label,status);
       if(!check.ok){const help=document.createElement('small');help.textContent=check.help;row.append(help);}return row;
     });
-    const result=document.createElement('p');result.className='footnote';result.textContent=wizardCompleted?(checks.every(c=>c.ok)?'Gespeichert. Alle benötigten Verbindungen sind bereit.':'Gespeichert. Die markierten Verbindungen noch prüfen.'):'Diese Prüfung zeigt die aktuell gespeicherten Verbindungen. Änderungen danach speichern.';
+    const result=document.createElement('p');result.className='footnote';result.textContent=wizardCompleted?(checks.every(c=>c.ok)?'Gespeichert. Alle benötigten Verbindungen sind bereit.':'Gespeichert. Die markierten Verbindungen noch prüfen.'):'Prüfung der gespeicherten Einstellungen. Änderungen noch speichern.';
     $('wizard-check').replaceChildren(...rows,result);
     if(wizardCompleted)$('wizard-next').textContent='Einrichtung beenden';
   }
@@ -165,7 +166,7 @@
     const result=await api('/api/config',data);Object.assign(configBaseline,data);delete configBaseline.wifi_password;
     if('wifi_password' in data)configBaseline.wifi_password_set=!!data.wifi_password;
     f.wifi_password.value='';$('clear-wifi-password').checked=false;secretPlaceholders();
-    if(result.reboot_required){$('wizard-help').textContent='WLAN gespeichert. TeeNet verbindet sich jetzt mit dem Heimnetz. Danach die neue Geräteadresse öffnen und den Einrichtungsassistenten fortsetzen.';await api('/api/reboot',{});toast('Neustart · anschließend im Heimnetz verbinden.');}
+    if(result.reboot_required){$('wizard-help').textContent='WLAN gespeichert. Nach dem Neustart TeeNet im Heimnetz öffnen und den Assistenten fortsetzen.';await api('/api/reboot',{});toast('Neustart · anschließend im Heimnetz verbinden.');}
     else toast('WLAN gespeichert. Mit „Weiter“ fortfahren.');
   }));
   $('wizard-open').addEventListener('click',()=>{if(!initialized)return;wizardCompleted=false;if(wizardStep<0){wizardGroups=Array.from(document.querySelectorAll('.settings-group,.equipment-panel'),el=>({el,hidden:el.hidden,open:el.open}));wizardOptions=Array.from(document.querySelectorAll('[data-expert-option]'),el=>({el,hidden:el.hidden,disabled:el.disabled}));for(const saved of wizardOptions){const basic=isBasic($('config-form').elements),selected=saved.el.value===saved.el.parentElement.value;saved.el.hidden=basic&&!selected;saved.el.disabled=basic&&!selected;}}wizardStep=0;$('wizard').hidden=false;document.documentElement.dataset.wizard='true';layout();$('wizard').scrollIntoView({block:'start',behavior:'smooth'});});

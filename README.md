@@ -1,4 +1,4 @@
-# TeeNet 1.11
+# TeeNet 1.12
 
 Lokale ESP32-S3-Steuerung für die **Shell Recharge Advanced 3.0**.
 
@@ -24,7 +24,7 @@ Empfohlen wird der erprobte **ESP32-S3 N16R8 mit 16 MB Flash** und USB-Versorgun
 
 Ein **separater Zähler am Wallbox-Abgang** ist für die Regelung erforderlich. Die Shell muss für externes dynamisches Lastmanagement eingerichtet sein. Unterstützte Zähler und Anschlüsse beschreibt die [Anleitung](https://teennet-demo.stetastic.chatgpt.site/help).
 
-Am Referenzaufbau erprobt: dreiphasig 5,5–11 kW, einphasig 2,0–3,5 kW. Der nutzbare Bereich hängt von Fahrzeug und Aufbau ab. Details stehen im [Messprotokoll](Probelauf.md).
+Am Referenzaufbau erprobt: dreiphasig 5,5–11 kW, einphasig 2,0–3,5 kW. Der nutzbare Bereich hängt von Fahrzeug und Aufbau ab. Details stehen im [Messprotokoll](https://github.com/stetastic/TeeNet/blob/main/Probelauf.md).
 
 ## Hinweis
 

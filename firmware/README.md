@@ -1,7 +1,7 @@
-# TeeNet 1.11
+# TeeNet 1.12
 
 Quellcode für Shell Recharge Advanced 3.0 mit ESP32-S3 N16R8 (16 MB Flash).
-Firmware-Build: `e531cc2efe09`.
+Firmware-Build: `4f4aef6ded31`.
 
 ## Bauen
 
@@ -22,9 +22,9 @@ Standardanschlüsse: Shell TX17/RX18, Wallbox-Zähler TX4/RX5, automatische RS48
 
 ## EM24-E1 und AtomS3 Lite
 
-Der EM24-E1 liefert am Hausanschluss drei Phasenströme und Gesamtwirkleistung über Modbus TCP (Port 502, Adresse 1). Er ersetzt nicht den separaten Wallbox-Zähler.
+Der EM24-E1 liefert drei Phasenströme und Gesamtwirkleistung über Modbus TCP (Port 502, Adresse 1). Er kann am Wallbox-Abgang oder am Hausanschluss eingesetzt werden; beide Messstellen benötigen eigene Zähler.
 
-Bei einem Shelly-Wallbox-Zähler über Modbus TCP werden GPIO4/5 frei. Für die Atomic RS485 Base Shell TX6/RX5 wählen und den Betriebsartkontakt auf GPIO6 deaktivieren.
+Bei einem Shelly- oder EM24-E1-Wallbox-Zähler über Modbus TCP werden GPIO4/5 frei. Für die Atomic RS485 Base Shell TX6/RX5 wählen und den Betriebsartkontakt auf GPIO6 deaktivieren.
 
 **AtomS3 Lite benötigt einen eigenen 8-MB-Build.** Die angebotenen Binärdateien sind für N16R8 / 16 MB. PSRAM ist im aktuellen Build nicht aktiviert. EM24-E1 und AtomS3 Lite sind noch nicht an echter Hardware geprüft; Tests und Feedback sind willkommen.
 

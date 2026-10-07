@@ -1,7 +1,7 @@
 'use strict';
 window.TeeNetFirmware=(()=>{
   function prefixInfo(bytes){
-    if(bytes.length<288||bytes[0]!==0xe9||bytes[1]<1||bytes[1]>16||bytes[12]!==9||bytes[13]!==0||bytes[32]!==0x32||bytes[33]!==0x54||bytes[34]!==0xcd||bytes[35]!==0xab)throw Error('Keine TeeNet-OTA-Datei für ESP32-S3. Das USB-Paket gehört in den Webinstaller.');
+    if(bytes.length<288||bytes[0]!==0xe9||bytes[1]<1||bytes[1]>16||bytes[12]!==9||bytes[13]!==0||bytes[32]!==0x32||bytes[33]!==0x54||bytes[34]!==0xcd||bytes[35]!==0xab)throw Error('TeeNet-OTA-Datei für ESP32-S3 auswählen, kein USB-Image.');
     const text=(offset)=>{let end=offset;while(end<offset+32&&bytes[end])end++;if(end===offset+32)throw Error('Firmware-Kopf ungültig.');return new TextDecoder().decode(bytes.slice(offset,end));};
     const version=text(48);if(text(80)!=='wallbox_ems'||!/^\d+\.\d+$/.test(version))throw Error('Die Datei gehört nicht zu TeeNet.');
     const appHash=Array.from(bytes.slice(176,208),v=>v.toString(16).padStart(2,'0')).join('');
@@ -24,7 +24,7 @@ window.TeeNetFirmware=(()=>{
   function checkBoot(s){
     const p=pending();if(!p)return null;
     if(s.version===p.version&&(s.app_elf_sha256?s.app_elf_sha256===p.appHash:s.build_id!==p.build)){try{sessionStorage.removeItem('teenet-update');}catch(_){}return `TeeNet ${s.version} ist installiert und wieder erreichbar. Ladung bleibt ausgeschaltet.`;}
-    if(Date.now()-p.at>180000){try{sessionStorage.removeItem('teenet-update');}catch(_){}return 'Update-Erfolg noch nicht bestätigt. Installierte Version und Verbindung prüfen.';}
+    if(Date.now()-p.at>180000){try{sessionStorage.removeItem('teenet-update');}catch(_){}return 'Update noch nicht bestätigt. Version und Verbindung prüfen.';}
     return null;
   }
   return {prefixInfo,inspect,compare,remember,checkBoot};

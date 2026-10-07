@@ -60,7 +60,7 @@ void settings_fixed_pins(settings_t *s) {
 }
 static bool pin_valid(int pin) { return pin==1 || pin==2 || (pin>=4 && pin<=18) || pin==21 || (pin>=38 && pin<=44) || pin==47; }
 bool settings_shell_pin_available(const settings_t *s,int pin,bool tx) {
-    bool wallbox_serial=strcmp(s->wallbox_meter_type,"shelly_gen2") && strcmp(s->wallbox_meter_type,"shelly_em1");
+    bool wallbox_serial=strcmp(s->wallbox_meter_type,"shelly_gen2") && strcmp(s->wallbox_meter_type,"shelly_em1") && strcmp(s->wallbox_meter_type,"em24_tcp");
     if(!pin_valid(pin) || pin==(tx?s->wallbox_rx_pin:s->wallbox_tx_pin) ||
        (wallbox_serial && (pin==s->xemex_tx_pin || pin==s->xemex_rx_pin))) return false;
     bool serial=!strcmp(s->house_meter_type,"xemex") || sdm_profile(s->house_meter_type)!=NULL;
@@ -77,7 +77,7 @@ bool settings_valid(const settings_t *s) {
        !memchr(s->wallbox_meter_host,0,sizeof(s->wallbox_meter_host)) ||
        !memchr(s->wallbox_meter_password,0,sizeof(s->wallbox_meter_password))) return false;
     bool house_serial=!strcmp(s->house_meter_type,"xemex") || sdm_profile(s->house_meter_type)!=NULL;
-    bool wallbox_serial=strcmp(s->wallbox_meter_type,"shelly_gen2") && strcmp(s->wallbox_meter_type,"shelly_em1");
+    bool wallbox_serial=strcmp(s->wallbox_meter_type,"shelly_gen2") && strcmp(s->wallbox_meter_type,"shelly_em1") && strcmp(s->wallbox_meter_type,"em24_tcp");
     if(!strcmp(s->house_meter_type,"sdm230") || !strcmp(s->house_meter_type,"sdm120") ||
        (!strcmp(s->house_meter_type,"xemex") && s->house_xemex_coils!=3) || s->xemex_coils==2)return false;
     const int pins[]={s->wallbox_tx_pin,s->wallbox_rx_pin,s->wallbox_rts_pin,
@@ -119,7 +119,7 @@ bool settings_valid(const settings_t *s) {
     if(strcmp(s->house_meter_type,"tasmota") && strcmp(s->house_meter_type,"shelly_gen2") && strcmp(s->house_meter_type,"shelly_em1") &&
        strcmp(s->house_meter_type,"xemex") && strcmp(s->house_meter_type,"huawei") && strcmp(s->house_meter_type,"em24_tcp") && !sdm_profile(s->house_meter_type)) return false;
     if(!memchr(s->wallbox_meter_type,0,sizeof(s->wallbox_meter_type)) || !memchr(s->house_power_path,0,sizeof(s->house_power_path))) return false;
-    bool network_wallbox=!strcmp(s->wallbox_meter_type,"shelly_gen2") || !strcmp(s->wallbox_meter_type,"shelly_em1");
+    bool network_wallbox=!strcmp(s->wallbox_meter_type,"shelly_gen2") || !strcmp(s->wallbox_meter_type,"shelly_em1") || !strcmp(s->wallbox_meter_type,"em24_tcp");
     if(strcmp(s->wallbox_meter_type,"xemex") && !sdm_profile(s->wallbox_meter_type) && !network_wallbox) return false;
     if(s->meter_baud!=1200 && s->meter_baud!=2400 && s->meter_baud!=4800 && s->meter_baud!=9600 && s->meter_baud!=19200 && s->meter_baud!=38400) return false;
     bool house_url=!strncmp(s->house_power_path,"http://",7) || !strncmp(s->house_power_path,"https://",8);

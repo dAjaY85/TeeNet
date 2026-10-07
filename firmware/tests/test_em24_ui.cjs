@@ -1,11 +1,12 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const source=fs.readFileSync('main/dashboard.js','utf8');
 function part(a,b){const start=source.indexOf(a),end=source.indexOf(b,start);assert(start>=0&&end>start);return source.slice(start,end);}
-const fields={wallbox_meter_type:{value:'shelly_gen2'},wallbox_meter_host:{value:'wallbox.demo'},house_meter_type:{value:'em24_tcp'},house_meter_host:{value:'192.168.178.20:1502'},house_address:{value:'7'},house_power_path:{value:'old.path'}};
+const fields={wallbox_meter_type:{value:'shelly_gen2'},wallbox_meter_host:{value:'wallbox.demo'},xemex_address:{value:'9'},house_meter_type:{value:'em24_tcp'},house_meter_host:{value:'192.168.178.20:1502'},house_address:{value:'7'},house_power_path:{value:'old.path'}};
 const nodes={'config-form':{elements:fields}};
 function $(id){return nodes[id]??=(id.endsWith('select')?{value:''}:{});}
 const ctx=vm.createContext({$,Number,Map,JSON,scanTarget:'house',scanFamily:'',meterScanning:false,previewKeys:{house:'',wallbox:''}});
-vm.runInContext(part('function previewRequest(','function scanUi(')+part('function shellPinChoices(','function updateShellPins(')+part('function updateHouseQuery(','function updateWallboxQuery(')+part('function updateMeterFields(','function updateExpertMode('),ctx);
+vm.runInContext(part('function previewRequest(','function scanUi(')+part('function shellPinChoices(','function updateShellPins(')+part('function updateHouseQuery(',"$('config-form').addEventListener('input'")+part('function updateMeterFields(','function updateExpertMode('),ctx);
+ctx.previewUi=role=>({box:$(role+'-preview'),host:$(role+'-preview-host'),value:$(role+'-preview-value'),state:$(role+'-preview-state')});
 ctx.meterFamily=()=> 'shelly';
 vm.runInContext('updateHouseQuery();updateMeterFields()',ctx);
 assert.equal(nodes['meter-discovery'].hidden,true,'Do not offer Shelly discovery for an EM24');
@@ -22,7 +23,28 @@ assert.match(vm.runInContext("shellPinChoices(values,'wallbox_rx_pin').find(x=>x
 fields.house_meter_type.value='tasmota';vm.runInContext('updateHouseQuery();updateMeterFields()',ctx);
 assert.equal(nodes['house-em24-note'].hidden,true);assert.equal(nodes['house-unit-field'].hidden,true);
 assert.equal(nodes['meter-discovery'].hidden,false);
+fields.wallbox_meter_type.value='em24_tcp';ctx.values.wallbox_meter_type='em24_tcp';
+vm.runInContext('updateWallboxQuery();updateMeterFields()',ctx);
+assert.equal(nodes['wallbox-network-settings'].hidden,false);
+assert.equal(nodes['wallbox-meter-discovery'].hidden,true);
+assert.equal(nodes['wallbox-shelly-modbus-note'].hidden,true);
+assert.equal(nodes['wallbox-em24-note'].hidden,false);
+assert.equal(nodes['wallbox-preview'].hidden,false);
+assert.equal(vm.runInContext("previewRequest('wallbox').unit_id",ctx),9);
+assert.equal(vm.runInContext("shellPinChoices(values,'wallbox_rx_pin').find(x=>x.pin===5).reason",ctx),'');
+fields.wallbox_meter_type.value='xemex';vm.runInContext('updateWallboxQuery()',ctx);
+assert.equal(nodes['wallbox-preview'].hidden,true,'Do not poll a hidden network meter');
+fields.wallbox_meter_type.value='shelly_gen2';vm.runInContext('updateWallboxQuery()',ctx);
+assert.equal(nodes['wallbox-meter-discovery'].hidden,false);
+assert.equal(nodes['wallbox-em24-note'].hidden,true);
 const html=fs.readFileSync('main/dashboard.html','utf8');
 assert.equal((html.match(/name="house_address"/g)||[]).length,1);
 assert(html.includes('value="em24_tcp"'));assert(html.includes('id="house-em24-note"'));
+assert.equal((html.match(/name="xemex_address"/g)||[]).length,1);
+const shellStart=html.indexOf('id="shell-settings"'),meterStart=html.indexOf('id="meter-settings"'),houseStart=html.indexOf('id="house-settings"');
+assert(shellStart>0&&shellStart<meterStart&&meterStart<houseStart);
+const shellCard=html.slice(shellStart,meterStart),meterCard=html.slice(meterStart,houseStart);
+assert(shellCard.includes('id="shell-search"')&&shellCard.includes('id="shell-pin-settings"'));
+assert(!meterCard.includes('id="shell-search"')&&!meterCard.includes('name="wallbox_tx_pin"'));
+assert(meterCard.includes('value="em24_tcp"'));
 console.log('PASS: EM24 model, TCP unit/port preview, contextual fields, discovery visibility and GPIO5 choices');
