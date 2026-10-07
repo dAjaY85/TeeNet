@@ -16,12 +16,6 @@ Lokale ESP32-S3-Steuerung für die **Shell Recharge Advanced 3.0**.
 
 Der USB-Webinstaller dient der Erstinstallation und löscht vorhandene Daten. Eingerichtete Geräte per OTA aktualisieren. Die Online-Demo arbeitet ohne Hardware.
 
-## Neu in 1.11
-
-EM24-E1 als Hausanschlusszähler über Modbus TCP: drei Phasenströme und Gesamtwirkleistung. GPIO4/5 werden freigegeben, wenn der Wallbox-Zähler über Shelly Modbus TCP verbunden ist; damit lässt sich Shell RX auf GPIO5 einstellen. Atomic RS485 Base: TX6/RX5, ohne gleichzeitigen Betriebsartkontakt auf GPIO6.
-
-Ein separater Zähler am Wallbox-Abgang bleibt erforderlich. EM24 und AtomS3 Lite sind noch nicht an echter Hardware geprüft; Tests und Feedback sind willkommen. Die Download-Binärdateien sind für N16R8 / 16 MB Flash. AtomS3 Lite benötigt einen eigenen 8-MB-Build. Zunächst nur erforderliche Funktionen aktivieren; ungenutzte Erweiterungen deaktivieren.
-
 ## Hardware
 
 ESP32-S3 N16R8 (16 MB Flash) und zwei automatische RS485-Wandler mit 3,3-V-Logik. USB-Versorgung. Ein Bus zur Shell, der zweite zum externen Wallbox-Zähler. Die HTTP-Messanzeige der Shell wird nicht als Regelquelle genutzt.
