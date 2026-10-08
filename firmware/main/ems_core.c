@@ -29,6 +29,7 @@ void settings_defaults(settings_t *s) {
     s->relay1_pin=12; s->relay2_pin=14;
     s->battery_cloud_limit_w=4000; s->battery_assist_limit_w=4000;
     s->pv_house_priority_w=4000; s->pv_car_priority_w=6000;
+    strcpy(s->opendtu_prefix,"opendtu");
 
     s->external_mode_input_pin=6; s->evu_input_pin=7; s->evu_limit_a=0;
     s->house_tx_pin=43; s->house_rx_pin=44; s->house_rts_pin=-1;
@@ -70,7 +71,17 @@ bool settings_shell_pin_available(const settings_t *s,int pin,bool tx) {
         !(s->relay_board_enabled && (pin==s->relay1_pin || pin==s->relay2_pin)) &&
         !(s->phase_switch_enabled && s->phase_feedback_enabled && pin==13);
 }
+static bool mqtt_topic_valid(const char *text,size_t size,bool required) {
+    if(!memchr(text,0,size) || (required&&!text[0]))return false;
+    for(const unsigned char *p=(const unsigned char *)text;*p;p++)if(*p<32||*p==127||*p=='#'||*p=='+')return false;
+    return true;
+}
 bool settings_valid(const settings_t *s) {
+    if(!mqtt_topic_valid(s->opendtu_prefix,sizeof(s->opendtu_prefix),s->mqtt_input_source==2) ||
+       !mqtt_topic_valid(s->opendtu_pv_topic,sizeof(s->opendtu_pv_topic),s->mqtt_input_source==2&&s->pv_display_enabled) ||
+       !mqtt_topic_valid(s->opendtu_pv_valid_topic,sizeof(s->opendtu_pv_valid_topic),false))return false;
+    if(s->mqtt_input_source==2 && (s->opendtu_prefix[strlen(s->opendtu_prefix)-1]=='/' || !strcmp(s->opendtu_prefix,s->mqtt_prefix)))return false;
+
     if(!memchr(s->house_meter_type,0,sizeof(s->house_meter_type)) ||
        !memchr(s->wallbox_meter_type,0,sizeof(s->wallbox_meter_type)) ||
        !memchr(s->house_meter_password,0,sizeof(s->house_meter_password)) ||
@@ -93,7 +104,7 @@ bool settings_valid(const settings_t *s) {
         for(unsigned j=0;j<i;j++) if(used[j] && pins[i]==pins[j]) return false;
     }
     if(s->ads1115_enabled) return false; /* retired input cannot be reactivated */
-    if(s->mqtt_input_source>1 || s->relay1_mode>3 || s->relay2_mode>2 ||
+    if(s->mqtt_input_source>2 || s->relay1_mode>3 || s->relay2_mode>2 ||
        (s->phase_switch_enabled && (!s->relay_board_enabled || s->relay1_mode!=3))) return false;
     if(!s->mqtt_enabled && (s->vehicle_soc_enabled || s->homeassistant_enabled ||
        (s->pv_display_enabled && !(s->huawei_enabled && s->huawei_pv)) ||
@@ -185,6 +196,7 @@ bool settings_decode(const void *blob,size_t length,settings_t *out) {
         case 22: prefix=offsetof(settings_t,phase_feedback_closed_is_single); break;
         case 23: prefix=offsetof(settings_t,control_status_visible); break;
         case 24: prefix=offsetof(settings_t,basic_mode); break;
+        case 25: prefix=offsetof(settings_t,opendtu_prefix); break;
         case EMS_SETTINGS_VERSION: prefix=sizeof(settings_t); break;
         default: return false;
     }
@@ -284,6 +296,11 @@ bool settings_apply_live(settings_t *runtime,const settings_t *before,const sett
     SAME(house_address); SAME(house_meter_baud); SAME(house_meter_format); SAME(house_xemex_coils);
     SAME(relay_board_enabled); SAME(relay_active_low); SAME(mqtt_enabled);
     SAME(relay1_pin); SAME(relay2_pin); SAME(relay1_mode); SAME(relay2_mode);
+    if(before->mqtt_input_source==2||after->mqtt_input_source==2){
+        SAME(mqtt_input_source);TEXT_SAME(opendtu_prefix);TEXT_SAME(opendtu_pv_topic);TEXT_SAME(opendtu_pv_valid_topic);
+        SAME(opendtu_current_positive_discharge);SAME(battery_protect);SAME(pv_display_enabled);
+    }
+
 
 #undef SAME
 #undef TEXT_SAME

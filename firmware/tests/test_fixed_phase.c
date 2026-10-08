@@ -1,0 +1,47 @@
+#include "ems_core.h"
+#include <assert.h>
+#include <math.h>
+#include <string.h>
+#include <stdio.h>
+static void near(float a,float b){assert(fabsf(a-b)<.01f);}
+int main(void){
+ settings_t s,loaded; settings_defaults(&s);assert(s.fixed_charge_phases==3);
+ /* Old padding must not become the new phase selection. */
+ s.version=19;size_t old_length=(offsetof(settings_t,fixed_charge_phases)+3)&~(size_t)3;
+ unsigned char blob[sizeof(s)];memcpy(blob,&s,sizeof(s));memset(blob+offsetof(settings_t,fixed_charge_phases),0xff,old_length-offsetof(settings_t,fixed_charge_phases));
+ assert(settings_decode(blob,old_length,&loaded));assert(loaded.fixed_charge_phases==3 && loaded.charge_phases==3);
+ settings_defaults(&s);s.fixed_charge_phases=1;s.charge_phases=s.manual_phases=1;s.enabled=true;s.mode=MODE_MANUAL;
+ assert(settings_valid(&s));assert(settings_decode(&s,sizeof(s),&loaded));assert(!loaded.enabled&&loaded.charge_phases==1&&loaded.manual_phases==1);
+ float a[]={8,8,8};near(estimated_charge_power(&s,a),1840);near(solar_current(&s,a,920),4);
+ near(charge_plan_maximum_kw(&s,true,false),3.68f);
+ s.manual_current_a=6;near(control_target(&s,true,true,true),0);
+ s.manual_current_a=8;near(control_target(&s,true,true,true),8);
+ float out[3];control_report(&s,a,8,0,true,out);near(out[0],s.grid_limit_a);
+ near(out[1],0);near(out[2],0);
+ control_report(&s,a,0,0,false,out);near(out[0],49);near(out[1],0);near(out[2],0);
+ float only_l1[]={8,NAN,NAN};control_report(&s,only_l1,8,0,false,out);near(out[0],32);near(out[1],0);near(out[2],0);
+ manual_report_filter_t filter={.active=true,.last_ms=1000,.reported={20,30,40}};
+ out[0]=32;out[1]=out[2]=35;manual_report_smooth(&filter,&s,8,3000,out);near(out[1],0);near(out[2],0);
+ s.grid_guard_enabled=true;float house[]={45,80,90};grid_guard_report(&s,true,house,out);near(out[0],45);near(out[1],0);near(out[2],0);
+ out[1]=7;out[2]=9;grid_guard_report(&s,false,house,out);near(out[1],0);near(out[2],0);
+ s.grid_guard_enabled=false;
+
+ /* Single-phase cold start has no idle-load ramp; a reduction must never
+    linger above a fresh, falling feedback value near the stop boundary. */
+ memset(&filter,0,sizeof(filter));out[0]=24;out[1]=out[2]=24;
+ manual_report_smooth(&filter,&s,8.7f,1000,out);near(out[0],32);near(out[1],0);near(out[2],0);
+ out[0]=39;manual_report_smooth(&filter,&s,8.7f,3000,out);near(out[0],33);
+ out[0]=32.8f;manual_report_smooth(&filter,&s,8.7f,5000,out);near(out[0],32.8f);
+ out[0]=32;manual_report_smooth(&filter,&s,8.7f,7000,out);near(out[0],32);
+ out[0]=33;manual_report_smooth(&filter,&s,8.7f,9000,out);near(out[0],32.3f);
+ out[0]=31;manual_report_smooth(&filter,&s,8.7f,11000,out);near(out[0],32);
+ out[0]=31;manual_report_smooth(&filter,&s,8.7f,13000,out);near(out[0],31.4f);
+ out[0]=49;manual_report_smooth(&filter,&s,8.7f,15000,out);near(out[0],49);assert(!filter.active);
+ out[0]=49;manual_report_smooth(&filter,&s,0,17000,out);near(out[0],49);near(out[1],0);near(out[2],0);
+
+ settings_t before=s;before.fixed_charge_phases=3;assert(!settings_apply_live(&s,&before,&s));
+ s.phase_switch_enabled=true;s.relay_board_enabled=true;s.relay1_mode=3;assert(!settings_valid(&s));
+ s.phase_switch_enabled=false;s.fixed_charge_phases=2;assert(!settings_valid(&s));
+ puts("PASS: fixed single-phase power, PV and plan ceilings, restart, legacy migration and relay conflict");
+ return 0;
+}

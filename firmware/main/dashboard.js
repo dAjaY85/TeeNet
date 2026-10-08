@@ -194,7 +194,7 @@ function render(){if(!state)return;const s=state,valid=online;
   $('house-battery-value').textContent=`${format(batteryFlow==='unknown'?null:Math.max(0,Math.abs(charge-discharge))/1000,2)} kW`;
 
 
-  const mqttSource=s.mqtt_input_source==='homeassistant'?'Home Assistant':'ioBroker';
+  const mqttSource=s.mqtt_input_source==='opendtu'?'OpenDTU':s.mqtt_input_source==='homeassistant'?'Home Assistant':'ioBroker';
   const signal=Number.isFinite(s.wifi_rssi_dbm)?` · ${s.wifi_rssi_dbm} dBm`:'';
   const diagnostics=[diagnostic('Heimnetz',s.wifi_ok?`${s.station_ip}${signal}`:'Nicht verbunden'),diagnostic('Uhrzeit',s.clock_ok?'Synchronisiert':'Warte auf Internetzeit'),diagnostic('MQTT',s.mqtt_ok?`Verbunden · ${mqttSource}`:`Nicht verbunden · ${mqttSource}`),diagnostic('Wallbox',s.wallbox_ok?'Kommunikation OK':'Keine aktuellen Abfragen'),diagnostic('Wallbox-Zähler',s.feedback_ok?'Daten aktuell':'Daten fehlen'),diagnostic('Hauszähler',s.house_meter_ok?'Daten aktuell':s.zero_feed_enabled||s.grid_guard_enabled?'Daten fehlen':'Nicht benötigt'),diagnostic('Speicherung',s.storage_ok?'Bereit':'Fehler'),...(s.huawei_enabled?[diagnostic('Huawei',s.huawei_ok?s.huawei_model:'Keine aktuellen Daten')]:[])];
   if(s.external_mode_input_enabled)diagnostics.push(diagnostic('Betriebsart-Kontakt',s.external_mode_contact?'PV-Überschuss':'Manuell'));
@@ -337,7 +337,7 @@ function updateEquipment(){const f=$('config-form').elements,checked=name=>f[nam
 
  $('house-settings').hidden=basic||!(checked('zero_feed_enabled')||checked('grid_guard_enabled'));$('maintenance').hidden=false;$('diagnostic-settings').hidden=!expert;
 
- $('huawei-settings').hidden=!checked('huawei_enabled');
+ $('huawei-settings').hidden=!checked('huawei_enabled');$('opendtu-settings').hidden=basic||Number(f.mqtt_input_source.value)!==2;
  if(f.house_meter_type.value==='huawei'){$('house-host-field').hidden=true;}
  const network=['tasmota','shelly_gen2','shelly_em1','em24_tcp'].includes(f.house_meter_type.value);
  const networkWallbox=f.wallbox_meter_type.value.startsWith('shelly_')||f.wallbox_meter_type.value==='em24_tcp';
@@ -380,7 +380,7 @@ $('config-form').addEventListener('change',e=>{
  if(name==='pv_display_enabled'&&f[name].checked&&!(f.huawei_enabled.checked&&f.huawei_pv.checked))f.mqtt_enabled.checked=true;
  updateEquipment();
 });
-async function loadConfig(){const cfg=await api('/api/config');configBaseline=cfg;for(const [name,value] of Object.entries(cfg)){const el=$('config-form').elements.namedItem(name);if(!el)continue;if(el.type==='checkbox')el.checked=value;else if(el.hasAttribute('data-boolean'))el.value=String(!!value);else if(el.type==='number'){const scale=Number(el.dataset.scale)||1;el.value=Number((Number(value)/scale).toFixed(4));}else if(!el.hasAttribute('data-secret'))el.value=value;}batterySliderDirty=false;$('battery-reserve-slider').value=String(Math.round(cfg.battery_reserve_soc/5)*5);updateBatterySlider();updateMeterFields();updateExpertMode();updateEquipment();secretPlaceholders();}
+async function loadConfig(){const cfg=await api('/api/config');configBaseline=cfg;for(const [name,value] of Object.entries(cfg)){const el=$('config-form').elements.namedItem(name);if(!el)continue;if(el.type==='checkbox')el.checked=value;else if(el.hasAttribute('data-boolean'))el.value=String(!!value);else if(el.type==='number'){const scale=Number(el.dataset.scale)||1;el.value=Number((Number(value)/scale).toFixed(4));}else if(!el.hasAttribute('data-secret')){if(el.tagName==='SELECT'&&!Array.from(el.options).some(option=>option.value===String(value))){const option=document.createElement('option');option.value=String(value);option.textContent=String(value);el.append(option);}el.value=value;}}batterySliderDirty=false;$('battery-reserve-slider').value=String(Math.round(cfg.battery_reserve_soc/5)*5);updateBatterySlider();updateMeterFields();updateExpertMode();updateEquipment();secretPlaceholders();}
 function updateBatterySlider(){$('battery-reserve-view').textContent=`${format(Number($('battery-reserve-slider').value),0)} %`;}
 function powerFactor(phases=state?.charge_phases??3){const single=state?.single_power_per_amp_kw;return Number.isFinite(single)?single*phases:.23*phases;}
 function phaseForPower(kw){return state?.phase_switch_enabled?(kw>0&&kw<=3.5?1:3):(state?.fixed_charge_phases??3);}
@@ -535,12 +535,13 @@ $('ota-file').addEventListener('change',async()=>{
 });
 $('ota-upload').addEventListener('click',()=>action(async()=>{
   const file=$('ota-file').files[0],info=await TeeNetFirmware.inspect(file,state?.ota_max_bytes);
-  if(!window.confirm(`TeeNet ${info.version} installieren? Die Ladung wird gestoppt.`))return;
+  if(!window.confirm(`TeeNet ${info.version} installieren? Die Ladung wird gestoppt.${$('ota-backup').checked?' Die Sicherung enthält Passwörter.':''}`))return;
   uploading=true;$('ota-status').textContent='Ladung stoppen …';
   try{
     if(state.enabled)await api('/api/control',{enabled:false,mode:'off'});
     const stoppedBy=Date.now()+60000;
     while(true){await pollStatus();const a=state.actual_a||[];if(!state.enabled&&(!state.feedback_ok||a.length===3&&a.every(v=>Number.isFinite(v)&&v<1)))break;if(Date.now()>stoppedBy)throw Error('Ladestopp noch nicht bestätigt. Erst Ende der Ladung abwarten.');$('ota-status').textContent='Warte auf Ende der Ladung …';await new Promise(resolve=>setTimeout(resolve,1000));}
+    if($('ota-backup').checked)await downloadSystemBackup();
     const oldBuild=state.build_id;
     await new Promise((resolve,reject)=>{
       const xhr=new XMLHttpRequest();xhr.open('POST','/api/ota');xhr.timeout=200000;xhr.setRequestHeader('Content-Type','application/octet-stream');xhr.setRequestHeader('X-EMS-Token',token);
@@ -553,6 +554,56 @@ $('ota-upload').addEventListener('click',()=>action(async()=>{
   }catch(error){$('ota-status').textContent=error.message;throw error;}finally{uploading=false;}
 }));
 
+async function stopForMaintenance(){
+  if(state.enabled)await api('/api/control',{enabled:false,mode:'off'});
+  const deadline=Date.now()+60000;
+  while(true){await pollStatus();const a=state.actual_a||[];if(!state.enabled&&(!state.feedback_ok||a.length===3&&a.every(v=>Number.isFinite(v)&&v<1)))return;if(Date.now()>deadline)throw Error('Ladestopp noch nicht bestätigt.');await new Promise(resolve=>setTimeout(resolve,1000));}
+}
+async function downloadSystemBackup(){
+  $('ota-status').textContent='Systemsicherung wird gelesen …';
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),300000);
+  try{
+    const response=await fetch('/api/backup/system',{headers:{'X-EMS-Token':token},cache:'no-store',signal:controller.signal});
+    if(!response.ok)throw Error((await response.text()).slice(0,240)||'Sicherung fehlgeschlagen.');
+    const expected=Number(response.headers.get('X-TeeNet-Backup-Bytes'));
+    if(!Number.isInteger(expected)||expected<4*1024*1024||expected>32*1024*1024)throw Error('Keine vollständige Systemsicherung erhalten.');
+    const reader=response.body.getReader(),chunks=[];let received=0;
+    while(true){const next=await reader.read();if(next.done)break;received+=next.value.length;if(received>expected){await reader.cancel();throw Error('Sicherungsgröße stimmt nicht.');}chunks.push(next.value);$('ota-status').textContent=`Systemsicherung: ${Math.round(received/expected*100)} %`;}
+    if(received!==expected)throw Error('Sicherung unvollständig. Update nicht gestartet.');
+    const zip=await TeeNetFirmware.backupZip(new Blob(chunks),state);
+    const url=URL.createObjectURL(zip),link=document.createElement('a');link.href=url;link.download=`TeeNet-${state.version}-Systemsicherung-${new Date().toISOString().slice(0,10)}.zip`;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+    $('ota-status').textContent='Sicherung heruntergeladen.';
+  }finally{clearTimeout(timeout);}
+}
+$('system-backup').addEventListener('click',()=>action(async()=>{
+  if(!window.confirm('Ladung stoppen und komplettes System sichern? Die Datei enthält Passwörter. Privat aufbewahren.'))return;
+  uploading=true;try{await stopForMaintenance();await downloadSystemBackup();}finally{uploading=false;}
+}));
+async function waitGitHub(){
+  const deadline=Date.now()+240000;
+  while(true){const result=await api('/api/update/github',undefined,15000);$('github-status').textContent=result.message+(result.running&&result.installing?` · ${result.progress} %`:'');
+    if(!result.running){if(!result.ok)throw Error(result.message||'GitHub-Abfrage fehlgeschlagen.');return result;}
+    if(Date.now()>deadline)throw Error('Zeitüberschreitung. Update-Status erneut prüfen.');await new Promise(resolve=>setTimeout(resolve,1500));}
+}
+let githubRelease=null;
+$('github-check').addEventListener('click',()=>action(async()=>{
+  githubRelease=null;$('github-install').hidden=true;
+  await api('/api/update/github',{action:'check'});const result=await waitGitHub();githubRelease=result;
+  $('github-install').hidden=!result.newer;$('github-install').textContent=`TeeNet ${result.version} installieren`;
+  $('github-status').textContent=result.newer?`TeeNet ${result.version} verfügbar.`:`GitHub: TeeNet ${result.version}. Installierte Version ${state.version} ist aktuell oder neuer.`;
+}));
+$('github-install').addEventListener('click',()=>action(async()=>{
+  if(!githubRelease?.newer)throw Error('Zuerst neueste Version prüfen.');
+  if(!window.confirm(`TeeNet ${githubRelease.version} von GitHub installieren? Ladung wird gestoppt.${$('ota-backup').checked?' Die Sicherung enthält Passwörter.':''}`))return;
+  uploading=true;let updateStarted=false;
+  try{
+    await stopForMaintenance();if($('ota-backup').checked)await downloadSystemBackup();
+    await api('/api/update/github',{action:'install'});updateStarted=true;
+    TeeNetFirmware.remember({version:githubRelease.version},state.build_id);
+    await waitGitHub();initialized=false;showConnection(false);schedulePoll(2000);
+  }catch(error){if(!updateStarted){$('github-status').textContent=error.message;}else {$('github-status').textContent=error.message+' Version und Verbindung prüfen.';schedulePoll(2000);}throw error;}
+  finally{uploading=false;}
+}));
 let statusPromise=null,loadedBuild='';
 async function pollStatus(){if(statusPromise)return statusPromise;statusPromise=(async()=>{const next=await api('/api/status',undefined,12000);if(loadedBuild&&next.build_id&&loadedBuild!==next.build_id){window.location.reload();return;}loadedBuild=next.build_id||loadedBuild;window.TeeNetHealth?.observe(next);state=next;token=state.token;statusFailures=0;showConnection(true);render();const updateMessage=window.TeeNetFirmware?.checkBoot(next);if(updateMessage){$('ota-status').textContent=updateMessage;toast(updateMessage);}})();try{return await statusPromise;}finally{statusPromise=null;}}
 

@@ -56,7 +56,8 @@
 
 <label>Topic-Präfix<input name="mqtt_prefix" maxlength="63" required></label>
 
-<label>MQTT-Datenquelle<select name="mqtt_input_source" data-number><option value="0">ioBroker</option><option value="1">Home Assistant</option></select></label>
+<label>MQTT-Datenquelle<select name="mqtt_input_source" data-number><option value="0">ioBroker</option><option value="1">Home Assistant</option><option value="2">OpenDTU-OnBattery</option></select></label>
+<div id="opendtu-settings" class="extended-feature" hidden><h3>OpenDTU-OnBattery</h3><label>OpenDTU Topic-Präfix<input name="opendtu_prefix" maxlength="95" placeholder="opendtu"></label><label>PV-Leistung: vollständiges Topic (W)<input name="opendtu_pv_topic" maxlength="159" placeholder="opendtu/victron/SERIENNUMMER/PPV"></label><label>PV-Gültigkeit: Topic (optional, 0/1)<input name="opendtu_pv_valid_topic" maxlength="159" placeholder="Nur bei reiner PV: opendtu/ac/is_valid"></label><label class="check-label"><input name="opendtu_current_positive_discharge" type="checkbox">Positiver Batteriestrom bedeutet Entladen</label><p class="footnote">SOC, Spannung, Strom und Datenalter werden direkt gelesen. Akku-Wechselrichterleistung nicht als PV-Erzeugung verwenden. <a href="/guide#opendtu">Einrichtung</a></p></div>
 <p class="footnote extended-feature">Akku- und PV-Werte aus der Zentrale per MQTT an TeeNet senden. <a href="/guide#mqtt-einrichten" target="_blank" rel="noopener">Topics und Einrichtung</a>.</p>
 
 <label class="check-label"><input name="homeassistant_enabled" type="checkbox">TeeNet in Home Assistant anzeigen</label><p class="footnote">Messwerte und Bedienung automatisch anlegen.</p>
@@ -169,6 +170,10 @@
 
 <details class="advanced"><summary>Einstellungen sichern</summary><label class="check-label"><input id="backup-secrets" type="checkbox">WLAN- und MQTT-Passwörter einschließen</label><p id="backup-warning" class="footnote" hidden>Mit Passwörtern: Datei privat aufbewahren.</p><button id="backup-download" type="button" class="button" data-write>Sicherung herunterladen</button><label>Sicherung wiederherstellen<input id="restore-file" type="file" accept=".json,application/json"></label><button id="restore-upload" type="button" class="button" data-write>Wiederherstellen</button><p class="footnote">Verbrauchsdaten bleiben erhalten. Fehlende Passwörter bleiben unverändert. Danach neu starten und Messwerte prüfen.</p></details>
 
+<section class="data-source"><h3>Update von GitHub</h3><div class="actions"><button id="github-check" type="button" class="button" data-write>Neueste Version prüfen</button><button id="github-install" type="button" class="button primary-button" data-write hidden>Von GitHub installieren</button></div><p id="github-status" class="footnote" role="status">Prüft die aktuelle TeeNet-Veröffentlichung.</p></section>
+<details class="advanced"><summary>Komplette Systemsicherung</summary><p class="footnote">Firmware, Einstellungen und Verlauf. Enthält Passwörter – privat aufbewahren. Wiederherstellung per USB.</p><button id="system-backup" type="button" class="button" data-write>System auf Rechner sichern</button></details>
+<label class="check-label"><input id="ota-backup" type="checkbox" checked>Vor dem Update komplette Sicherung herunterladen</label>
+<p class="footnote">Die Sicherung enthält Passwörter. Datei privat aufbewahren.</p>
 <label>Firmware-Datei (.bin)<input id="ota-file" type="file" accept=".bin,application/octet-stream"></label><button id="ota-upload" type="button" class="button" data-write>OTA-Update installieren</button><p id="ota-status" class="footnote" role="status">Ladung vorher stoppen. Stromversorgung nicht trennen.</p>
 
 <details class="advanced"><summary>Gerät zurücksetzen</summary><p class="footnote">Löscht Einstellungen und Verbrauchsdaten. Für einen WLAN-Wechsel den Einrichtungs-AP verwenden.</p><button id="factory-reset" type="button" class="button danger" data-write>Werksreset · alles löschen</button><p class="footnote">Alternativ: fünf RST-Neustarts innerhalb von jeweils 15 Sekunden. <a href="/guide#wartung" target="_blank" rel="noopener">Zurücksetzen</a></p></details></details>

@@ -1,4 +1,8 @@
 #include "ems_core.h"
+#include "opendtu_mqtt.h"
+#include "github_release.h"
+#include "esp_flash.h"
+#include "mbedtls/sha256.h"
 #include "charge_sessions.h"
 #include "ems_features.h"
 #include "diagnostic_store.h"
@@ -185,6 +189,10 @@ static int64_t meter_at,actual_at,power_at,pv_at,wallbox_at,house_power_at,last_
 static int64_t wifi_lost_at;
 
 static bool wifi_fallback, wifi_scanning, wifi_ap_forced, ota_in_progress, ap_requested;
+static bool backup_in_progress;
+static SemaphoreHandle_t maintenance_flash_lock;
+static opendtu_state_t opendtu;
+
 static bool reset_count_pending;
 
 static int64_t reset_clear_at;
@@ -263,9 +271,12 @@ static void load_settings(void) {
 
         const char *keys[]={"settings_v21","settings_v20","settings_v19","settings_v18","settings_v16","settings_v15","settings_v14","settings_v13","settings_v12","settings_v11","settings_v10","settings_v9","settings_v8","settings_v7","settings_v6","settings_v5","settings_v4","settings_v3","settings_v2","settings_v1"};
 
-        for(unsigned i=0;i<sizeof(keys)/sizeof(keys[0]);i++) {
+        /* The decoder has its own settings copy. Keep the input off the small
+           startup stack as the append-only settings layout grows. */
+        unsigned char *blob=malloc(sizeof(settings_t));
+        for(unsigned i=0;blob && i<sizeof(keys)/sizeof(keys[0]);i++) {
 
-            unsigned char blob[sizeof(settings_t)]; size_t len=sizeof(blob);
+            size_t len=sizeof(settings_t);
 
             esp_err_t err=nvs_get_blob(nvs,keys[i],blob,&len);
 
@@ -276,6 +287,7 @@ static void load_settings(void) {
             break;
 
         }
+        free(blob);
 
         float offset;size_t offset_len=sizeof(offset);
         if(nvs_get_blob(nvs,"auto_offset",&offset,&offset_len)==ESP_OK && offset_len==sizeof(offset) &&
@@ -1214,7 +1226,7 @@ static cJSON *status_json(bool include_token) {
     cJSON_AddBoolToObject(o,"vehicle_soc_enabled",settings.vehicle_soc_enabled);
     cJSON_AddBoolToObject(o,"mqtt_enabled",settings.mqtt_enabled);
     cJSON_AddBoolToObject(o,"homeassistant_enabled",settings.homeassistant_enabled);
-    cJSON_AddStringToObject(o,"mqtt_input_source",settings.mqtt_input_source ? "homeassistant" : "iobroker");
+    cJSON_AddStringToObject(o,"mqtt_input_source",settings.mqtt_input_source==2?"opendtu":settings.mqtt_input_source ? "homeassistant" : "iobroker");
     cJSON_AddBoolToObject(o,"pv_display_enabled",settings.pv_display_enabled);
     cJSON_AddBoolToObject(o,"relay_board_enabled",settings.relay_board_enabled);
     if(settings.relay_board_enabled) {
@@ -1674,6 +1686,7 @@ static bool apply_control(cJSON *o) {
 static bool mqtt_input(const char *suffix,const char *payload) {
 
     if(!settings.mqtt_enabled) return false;
+    if(settings.mqtt_input_source==2 && (!strncmp(suffix,"input/battery_",14)||!strncmp(suffix,"input/pv_generation",19)))return true;
     if((!settings.battery_protect || (settings.huawei_enabled && settings.huawei_battery)) && !strncmp(suffix,"input/battery_",14))return true;
     if((!settings.pv_display_enabled || (settings.huawei_enabled && settings.huawei_pv)) && !strncmp(suffix,"input/pv_generation",19))return true;
     double value;
@@ -1773,11 +1786,12 @@ static bool mqtt_input(const char *suffix,const char *payload) {
 
 }
 
+#include "opendtu_runtime.inc"
 static void mqtt_event(void *arg,esp_event_base_t base,int32_t id,void *data) {
 
     esp_mqtt_event_handle_t e=data;
 
-    static char topic[192],payload[512]; static int received,expected;
+    static char topic[192],payload[512]; static int received,expected;static bool retained;
 
     if(id==MQTT_EVENT_CONNECTED) {
 
@@ -1788,6 +1802,7 @@ static void mqtt_event(void *arg,esp_event_base_t base,int32_t id,void *data) {
         if(!sdm_meter() && !network_wallbox_meter()) { snprintf(subscription,sizeof(subscription),"%s/sensor/wallbox_power_w",settings.mqtt_prefix); esp_mqtt_client_subscribe(e->client,subscription,1); }
 
         snprintf(subscription,sizeof(subscription),"%s/input/+",settings.mqtt_prefix); esp_mqtt_client_subscribe(e->client,subscription,1);
+        opendtu_subscribe(e->client);
 
         if(!settings.mqtt_state_json) { snprintf(subscription,sizeof(subscription),"%s/state",settings.mqtt_prefix); esp_mqtt_client_enqueue(e->client,subscription,"",0,1,1,false); }
 
@@ -1798,7 +1813,7 @@ static void mqtt_event(void *arg,esp_event_base_t base,int32_t id,void *data) {
 
     } else if(id==MQTT_EVENT_DISCONNECTED) {
 
-        LOCK(); mqtt_online=false; if(!(settings.huawei_enabled && settings.huawei_battery)){battery_soc_at=0;battery_charge_at=0;battery_discharge_at=0;} car_soc_at=0; if(!(settings.huawei_enabled && settings.huawei_pv))pv_generation_at=0; if(!sdm_meter() && !network_wallbox_meter()) power_at=0; if(!settings.zero_feed_enabled) pv_at=0; UNLOCK(); expected=received=0;
+        LOCK();memset(&opendtu,0,sizeof(opendtu)); mqtt_online=false; if(!(settings.huawei_enabled && settings.huawei_battery)){battery_soc_at=0;battery_charge_at=0;battery_discharge_at=0;} car_soc_at=0; if(!(settings.huawei_enabled && settings.huawei_pv))pv_generation_at=0; if(!sdm_meter() && !network_wallbox_meter()) power_at=0; if(!settings.zero_feed_enabled) pv_at=0; UNLOCK(); expected=received=0;
 
     } else if(id==MQTT_EVENT_DATA) {
 
@@ -1806,13 +1821,13 @@ static void mqtt_event(void *arg,esp_event_base_t base,int32_t id,void *data) {
 
             received=expected=0;
 
-            if(e->retain || e->topic_len<=0 || e->topic_len>=(int)sizeof(topic) || e->total_data_len<=0 || e->total_data_len>=(int)sizeof(payload)) {
+            if(e->topic_len<=0 || e->topic_len>=(int)sizeof(topic) || e->total_data_len<=0 || e->total_data_len>=(int)sizeof(payload)) {
 
                 LOCK(); mqtt_rejected++; UNLOCK(); return;
 
             }
 
-            memcpy(topic,e->topic,e->topic_len); topic[e->topic_len]=0; expected=e->total_data_len;
+            memcpy(topic,e->topic,e->topic_len); topic[e->topic_len]=0; expected=e->total_data_len;retained=e->retain;
 
         }
 
@@ -1824,7 +1839,11 @@ static void mqtt_event(void *arg,esp_event_base_t base,int32_t id,void *data) {
 
             payload[received]=0; expected=0; char prefix[80]; snprintf(prefix,sizeof(prefix),"%s/",settings.mqtt_prefix);
 
-            bool ok=!memchr(payload,0,received) && !strncmp(topic,prefix,strlen(prefix)) && mqtt_input(topic+strlen(prefix),payload);
+            bool ok=false;
+            if(!memchr(payload,0,received)) {
+                if(settings.mqtt_input_source==2 && opendtu_message(topic,payload,retained))ok=true;
+                else if(!retained&&!strncmp(topic,prefix,strlen(prefix)))ok=mqtt_input(topic+strlen(prefix),payload);
+            }
 
             if(!ok) { LOCK(); mqtt_rejected++; UNLOCK(); }
 
@@ -1968,7 +1987,7 @@ static const field_t fields[]={
     FIELD(relay_board_enabled,'b'),FIELD(relay_active_low,'b'),
     FIELD(relay1_mode,'u'),FIELD(relay2_mode,'u'),
     FIELD(mqtt_enabled,'b'),FIELD(homeassistant_enabled,'b'),FIELD(pv_display_enabled,'b'),FIELD(mqtt_input_source,'u'),
-    FIELD(wallbox_meter_host,'s'),FIELD(charge_plan_enabled,'b'),FIELD(huawei_enabled,'b'),FIELD(huawei_host,'s'),FIELD(huawei_unit_id,'u'),FIELD(huawei_battery,'b'),FIELD(huawei_pv,'b')};
+    FIELD(wallbox_meter_host,'s'),FIELD(charge_plan_enabled,'b'),FIELD(huawei_enabled,'b'),FIELD(huawei_host,'s'),FIELD(huawei_unit_id,'u'),FIELD(huawei_battery,'b'),FIELD(huawei_pv,'b'),FIELD(opendtu_prefix,'s'),FIELD(opendtu_pv_topic,'s'),FIELD(opendtu_pv_valid_topic,'s'),FIELD(opendtu_current_positive_discharge,'b')};
 
 static cJSON *config_json(bool secrets) {
 
@@ -1999,6 +2018,9 @@ static cJSON *config_json(bool secrets) {
 }
 
 static esp_err_t config_apply(httpd_req_t *req,cJSON *o,bool restore) {
+    LOCK();bool maintenance=ota_in_progress||restarting;UNLOCK();
+    if(maintenance){cJSON_Delete(o);httpd_resp_set_status(req,"409 Conflict");return httpd_resp_sendstr(req,"Sicherung oder Update laeuft. Danach erneut versuchen.");}
+
 
     settings_t next; LOCK(); next=saved_settings; UNLOCK(); bool valid=true;
 
@@ -2255,6 +2277,8 @@ static esp_err_t ap_handler(httpd_req_t *req) {
 }
 
 #include "ota_http.inc"
+#include "github_update.inc"
+#include "system_backup.inc"
 
 static esp_err_t wifi_scan_handler(httpd_req_t *req) {
 
@@ -2813,6 +2837,9 @@ static void start_web(void) {
         {.uri="/api/config",.method=HTTP_GET,.handler=config_get},{.uri="/api/config",.method=HTTP_POST,.handler=config_post},
         {.uri="/api/events",.method=HTTP_GET,.handler=events_handler},
         {.uri="/api/backup",.method=HTTP_GET,.handler=backup_handler},
+        {.uri="/api/backup/system",.method=HTTP_GET,.handler=system_backup_handler},
+        {.uri="/api/update/github",.method=HTTP_GET,.handler=github_get},
+        {.uri="/api/update/github",.method=HTTP_POST,.handler=github_post},
         {.uri="/api/restore",.method=HTTP_POST,.handler=restore_handler},
         {.uri="/api/plan",.method=HTTP_POST,.handler=plan_handler},
         {.uri="/api/huawei/scan",.method=HTTP_GET,.handler=huawei_scan_get},
@@ -2963,8 +2990,9 @@ static void status_task(void *arg) {
     while(true) {
 
         int64_t now=now_ms(),epoch,midnight; uint32_t date=calendar(&epoch,&midnight); LOCK();
-        if(reset_count_pending && now>=reset_clear_at) { UNLOCK(); reset_sequence_clear(); LOCK(); }
+        if(reset_count_pending && now>=reset_clear_at && !backup_in_progress) { UNLOCK(); reset_sequence_clear(); LOCK(); }
 
+        opendtu_apply_locked(now);
         contacts_step_locked(now);
         phase_step_locked(now);
         relay_signals_locked(now);
@@ -3013,6 +3041,7 @@ static void status_task(void *arg) {
 
         if(event_log.sequence!=previous_event_sequence&&diagnostic_store_add(&fault_log,ems_event_recent(&event_log,0))){fault_dirty=true;fault_revision++;}
         bool reboot=restarting,online=wifi_online,session_checkpoint=sessions.checkpoint,changed=energy.store.total_wh[0]!=saved_total[0] || energy.store.total_wh[1]!=saved_total[1]; UNLOCK();
+        if(xSemaphoreTake(maintenance_flash_lock,0)==pdTRUE){
         LOCK();bool persist_calibration=calibration_dirty && (reboot || now-calibration_saved_at>=1800000);
         float offset_to_save=settings.current_offset_a;UNLOCK();
         if(persist_calibration && config_storage_ok){
@@ -3035,6 +3064,8 @@ static void status_task(void *arg) {
         if(persist_plan)save_plan();
 
         save_diagnostics(reboot);
+        xSemaphoreGive(maintenance_flash_lock);
+        }
         if(reboot) {
 
             vTaskDelay(ticks(1000));
@@ -3076,7 +3107,7 @@ void app_main(void) {
         snprintf(mqtt_device_id,sizeof(mqtt_device_id),"teenet_%02x%02x%02x%02x%02x%02x",
             mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
 
-    state_lock=xSemaphoreCreateMutex(); wifi_action_lock=xSemaphoreCreateMutex(); plan_save_lock=xSemaphoreCreateMutex(); if(!state_lock || !wifi_action_lock || !plan_save_lock) abort();
+    state_lock=xSemaphoreCreateMutex(); wifi_action_lock=xSemaphoreCreateMutex(); plan_save_lock=xSemaphoreCreateMutex();maintenance_flash_lock=xSemaphoreCreateMutex(); if(!state_lock || !wifi_action_lock || !plan_save_lock||!maintenance_flash_lock) abort();
 
     /* Never erase settings or accumulated energy automatically on storage errors. */
 

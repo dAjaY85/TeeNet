@@ -1,0 +1,20 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),crypto=require('node:crypto');
+const memory=new Map(),ctx=vm.createContext({window:{crypto:crypto.webcrypto},Date,TextDecoder,Uint8Array,Array,Number,Object,Math,Error,sessionStorage:{getItem:k=>memory.get(k),setItem:(k,v)=>memory.set(k,v),removeItem:k=>memory.delete(k)}});
+vm.runInContext(fs.readFileSync('main/health.js','utf8'),ctx);vm.runInContext(fs.readFileSync('main/firmware.js','utf8'),ctx);
+const h=ctx.window.TeeNetHealth,f=ctx.window.TeeNetFirmware;
+const good={wallbox_meter_type:'xemex',house_meter_type:'tasmota',feedback_ok:true,actual_a:[8,8,8],estimate_w:5520,house_meter_ok:true,house_power_w:-800,battery_soc_ok:true,battery_soc_pct:70,pv_generation_w:8500,wifi_ok:true,mqtt_ok:true,wallbox_ok:true,clock_ok:true,battery_ok:true,house_current_ok:false};
+h.observe(good,100000);assert.equal(h.reading(good,'wallbox',true,100000).value,5520);
+const failed={...good,feedback_ok:false,estimate_w:null,house_meter_ok:false,house_power_w:null,battery_soc_pct:null,pv_generation_w:null};
+h.observe(failed,109000);assert.equal(h.reading(failed,'wallbox',true,109000).fresh,false);assert.equal(h.reading(failed,'wallbox',true,109000).value,5520);assert.equal(h.reading(failed,'wallbox',true,109000).age,9);assert.equal(failed.estimate_w,null,'retained display values never modify controller state');
+assert.equal(h.reading(good,'house',false,120000).fresh,false);assert.equal(h.setupChecks(good,{mqtt_enabled:false}).length,4);assert.equal(h.setupChecks(good,{grid_guard_enabled:true}).at(-1).ok,false);
+const sanitized=h.sanitize({status:{token:'secret',station_ip:'192.168.1.5',energy:{today:99},version:'1.10'},settings:{wifi_ssid:'private',mqtt_uri:'mqtt://private',mqtt_password:'secret',house_meter_host:'private',house_address:1},other:[{mqtt_username:'private',good:true}]});
+assert(!JSON.stringify(sanitized).includes('private'));assert(!JSON.stringify(sanitized).includes('secret'));assert.equal(sanitized.settings.house_address,1);
+(async()=>{
+ const data=new Uint8Array(1056);data[0]=0xe9;data[1]=4;data[12]=9;data[23]=1;data.set([0x32,0x54,0xcd,0xab],32);data.set(Buffer.from('1.10\0'),48);data.set(Buffer.from('wallbox_ems\0'),80);
+ data.set(crypto.createHash('sha256').update(data.slice(0,-32)).digest(),data.length-32);
+ const file=()=>({name:'TeeNet.bin',size:data.length,arrayBuffer:async()=>data.slice().buffer});
+ const info=await f.inspect(file());assert.equal(info.version,'1.10');assert.equal(info.integrity,true);assert(f.compare('1.10','1.9')>0);
+ f.remember(info,'old');assert.equal(f.checkBoot({version:'1.10',build_id:'new',app_elf_sha256:'wrong'}),null);assert.match(f.checkBoot({version:'1.10',build_id:'new',app_elf_sha256:info.appHash}),/installiert/);
+ data[400]^=1;await assert.rejects(f.inspect(file()),/beschädigt/);data[12]=0;await assert.rejects(f.inspect(file()),/ESP32-S3/);
+ console.log('PASS: stale display never changes control inputs, optional setup checks, redacted diagnostics, firmware checksum and boot identity');
+})().catch(e=>{console.error(e);process.exitCode=1;});

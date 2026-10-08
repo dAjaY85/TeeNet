@@ -13,7 +13,7 @@
 #define EMS_CHARGE_STOP_CONFIRM_MS 20000
 #define EMS_CHARGE_STOP_LIMIT 5
 #define EMS_CHARGE_STOP_WINDOW_MS 300000
-#define EMS_SETTINGS_VERSION 25
+#define EMS_SETTINGS_VERSION 26
 #define EMS_MIN_CHARGE_A 6.0f
 #define EMS_BATTERY_CAPACITY_KWH 20.0f
 #define EMS_BATTERY_DISCHARGE_MAX_W 4000.0f
@@ -113,6 +113,10 @@ typedef struct {
     bool pv_allocation_enabled;
     uint8_t pv_priority; /* 0 house first, 1 car first, 2 proportional */
     float pv_house_priority_w, pv_car_priority_w;
+    /* Version 26: read-only native OpenDTU-OnBattery MQTT input. */
+    char opendtu_prefix[96], opendtu_pv_topic[160], opendtu_pv_valid_topic[160];
+    bool opendtu_current_positive_discharge;
+
 } settings_t;
 
 int relay_output_level(bool active_low, bool energized);

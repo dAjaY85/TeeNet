@@ -1,0 +1,58 @@
+#include "ems_core.h"
+#include <assert.h>
+#include <math.h>
+#include <stdio.h>
+
+static void advance(pv_control_t *c,int64_t from,int64_t to,float available,bool permitted) {
+    for(int64_t now=from;now<=to;now+=1000) pv_control_step(c,permitted,available,8,16,now);
+}
+int main(void) {
+    pv_control_t c={0};
+    /* A full minute of surplus is required; a short interruption restarts it. */
+    advance(&c,0,59000,9,true); assert(c.target_a==0 && c.wait_ms==1000);
+    advance(&c,60000,60000,8.9f,true); assert(c.phase==PV_WAITING);
+    advance(&c,61000,120000,9,true); assert(c.target_a==0);
+    advance(&c,121000,121000,9,true); assert(c.target_a==9 && c.phase==PV_RUNNING);
+    advance(&c,122000,125000,16,true); assert(c.target_a==9);
+    advance(&c,126000,126000,16,true); assert(c.target_a==10);
+    advance(&c,127000,131000,16,true); assert(c.target_a==11);
+    advance(&c,132000,141000,16,true); assert(c.target_a==13);
+    /* A cloud lasting less than 30 s reduces current but does not restart the car. */
+    advance(&c,142000,170000,0,true); assert(c.target_a==8 && c.phase==PV_STOPPING);
+    advance(&c,171000,171000,9,true); assert(c.target_a>0 && c.phase==PV_RUNNING);
+    advance(&c,172000,201000,0,true); assert(c.target_a==8);
+    advance(&c,202000,202000,0,true); assert(c.target_a==0 && c.phase==PV_COOLDOWN && c.wait_ms==120000);
+    /* Returning sun cannot bypass cooldown, then another full start check. */
+    advance(&c,203000,321000,16,true); assert(c.target_a==0 && c.phase==PV_COOLDOWN);
+    advance(&c,322000,381000,16,true); assert(c.target_a==0 && c.phase==PV_STARTING);
+    advance(&c,382000,382000,16,true); assert(c.target_a==9);
+    /* Stop or a sensor failure must bypass the sun/cloud delay immediately. */
+    advance(&c,383000,383000,16,false); assert(c.target_a==0 && c.phase==PV_BLOCKED);
+    advance(&c,384000,384000,16,true); assert(c.target_a==0 && c.phase==PV_COOLDOWN);
+    advance(&c,385000,562000,16,true); assert(c.target_a==0);
+    advance(&c,563000,563000,16,true); assert(c.target_a==9);
+    advance(&c,564000,564000,NAN,true); assert(c.target_a==0 && c.phase==PV_BLOCKED);
+    /* Threshold noise for ten minutes never starts charging. */
+    pv_control_t noise={0};
+    for(int64_t t=0;t<=600000;t+=1000) {
+        pv_control_step(&noise,true,t%2000?8.3f:7.7f,8,16,t); assert(noise.target_a==0);
+    }
+    /* While running, short dips never switch the contactor off. */
+    pv_control_t clouds={0}; advance(&clouds,0,60000,16,true);
+    for(int64_t t=61000;t<=360000;t+=1000) {
+        pv_control_step(&clouds,true,(t/10000)%2?7.4f:9.0f,8,16,t); assert(clouds.target_a>=8);
+    }
+    pv_control_step(&clouds,true,16,8,16,370000); assert(clouds.target_a==0); /* stalled controller */
+    pv_control_step(&clouds,true,16,8,16,1000); assert(clouds.target_a==0 && clouds.phase==PV_COOLDOWN);
+    /* A minimum equal to maximum can still start, always within configured bounds. */
+    pv_control_t fixed={0};
+    for(int64_t t=0;t<=60000;t+=1000) pv_control_step(&fixed,true,8,8,8,t);
+    assert(fixed.target_a==8); pv_control_step(&fixed,true,INFINITY,8,8,61000); assert(fixed.target_a==0);
+    float idle[]={.2f,.2f,.2f},slow[]={7,7,7};
+    assert(pv_ramp_available(16,8.1f,idle)==8.1f);
+    assert(pv_ramp_available(16,8.1f,slow)==8);
+    assert(pv_ramp_available(6,8.1f,slow)==6);
+    assert(pv_ramp_available(16,0,idle)==16);
+    puts("PASS: PV start delay, cloud bridging, stop delay, cooldown, ramp limit, threshold noise, immediate stop/fault, clock and scheduler faults");
+    return 0;
+}

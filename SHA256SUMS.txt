@@ -1,4 +1,4 @@
-4ec6de246cd76a9ec81719e9511394bcbbe1a7f4606bf45ba2fdb37921f5ef69  TeeNet-1.12-ota.bin
-cdc1a65de29ef64d421cde8bbb6a8bd7e0685ed31019f7d0451fd026e8ae8ad7  TeeNet-1.12-usb.zip
-91797d085df310f0be8d83154219771abc0514fd07a5d5fd1c5e306acd3fcc3d  TeeNet-1.12-source.zip
-df3d81ad0d5bb5c8e24a5e1008d906d75343f3e77bedf631f455495615852d26  TeeNet-1.12-factory.bin
+7439dc534f6e9f27f2093048b1c97018caafb567aa00f88825c0595c6bb566b0  TeeNet-1.13-ota.bin
+a9b86ebbe4a4944da4bc4295adc4291a6f574b23dfd1d83b0e44fda374f80f09  TeeNet-1.13-usb.zip
+4bac7cc18d0aa0a030de90b9310fae6f75d66acf95caaff73b7ca5a3bf5f4a44  TeeNet-1.13-source.zip
+d198abeedbaeb6286175576eb6f51fdf50281e78ad3eb2a7479e0feaa70ee405  TeeNet-1.13-factory.bin
