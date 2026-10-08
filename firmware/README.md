@@ -1,7 +1,7 @@
-# TeeNet 1.13
+# TeeNet 1.14
 
 Quellcode für Shell Recharge Advanced 3.0 mit ESP32-S3 N16R8 (16 MB Flash).
-Firmware-Build: `2b6e88842dd8`.
+Firmware-Build: `0263b0b9ebde`.
 
 ## Bauen
 

@@ -1,0 +1,21 @@
+{
+  "name": "iobroker.teenet",
+  "version": "0.1.3",
+  "description": "TeeNet wallbox control and energy data integration",
+  "main": "main.js",
+  "license": "MIT",
+  "author": { "name": "stetastic" },
+  "repository": { "type": "git", "url": "git+https://github.com/stetastic/TeeNet.git", "directory": "iobroker.teenet" },
+  "engines": { "node": ">=22.19.0" },
+  "files": ["main.js", "lib/", "admin/", "io-package.json", "README.md", "LICENSE"],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:controller": "mocha --timeout 120000 test/controller.integration.js",
+    "test:package": "mocha --timeout 30000 test/package.validation.js",
+    "check": "node tools/check.js",
+    "pack:test": "node tools/pack.js"
+  },
+  "dependencies": { "@iobroker/adapter-core": "^3.4.3", "mqtt": "^5.16.0" },
+  "devDependencies": { "@iobroker/testing": "^6.3.0", "aedes": "^1.2.0", "ajv": "^8.17.1", "mocha": "^11.7.5" },
+  "keywords": ["ioBroker", "TeeNet", "wallbox", "mqtt", "pv"]
+}

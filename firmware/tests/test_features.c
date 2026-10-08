@@ -79,7 +79,7 @@ static void pv_replay(void) {
     settings_t s,out;settings_defaults(&s);assert(!s.charge_plan_enabled);
     s.version=17;s.charge_plan_enabled=true;
     assert(settings_decode(&s,(offsetof(settings_t,charge_plan_enabled)+3)&~(size_t)3,&out));
-    assert(!out.charge_plan_enabled && out.min_charge_a==8 && out.max_charge_a==16);
+    assert(!out.charge_plan_enabled && out.min_charge_a==8.7f && out.max_charge_a==16);
     settings_defaults(&s);settings_t runtime=s,next=s;runtime.enabled=true;runtime.mode=MODE_MANUAL;
     next.charge_plan_enabled=true;assert(settings_apply_live(&runtime,&s,&next));
     assert(runtime.charge_plan_enabled && runtime.enabled && runtime.mode==MODE_MANUAL);
@@ -114,6 +114,6 @@ static void pv_replay(void) {
     for(int64_t t=1153000;t<1253000;t+=1000){pv_control_step(&pv,true,(t/10000)%2?7.2f:12,8,16,t);assert(pv.target_a>=8);}
     pv_control_step(&pv,true,NAN,8,16,1253000);assert(pv.target_a==0);
     /* Settings and minimum/ramp implementation have not been retuned. */
-    assert(s.min_charge_a==8 && s.max_charge_a==16);
+    assert(s.min_charge_a==8.7f && s.max_charge_a==16);
 }
 int main(void){plans();events();pv_replay();puts("PASS: PV-first plans, deadline/grid completion, pause, clock/counter faults, bounded event log, 15-minute cloud replay, stale battery/meter and recovery");return 0;}

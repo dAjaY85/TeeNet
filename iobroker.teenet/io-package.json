@@ -1,0 +1,40 @@
+{
+  "common": {
+    "name": "teenet",
+    "version": "0.1.3",
+    "news": {"0.1.3": {"de": "Leistungsvorgaben an der unteren TeeNet-Ladegrenze zuverlässig bestätigen.", "en": "Reliably confirm power commands at TeeNet's lower charging limit."}, "0.1.2": {"de": "Objektbaum auf 22 wesentliche Datenpunkte reduziert.", "en": "Reduce the object tree to 22 essential states."}, "0.1.1": {"de": "Stopp hat Vorrang, gültige Rückmeldungen nach Neustart und weniger Datenbankzugriffe.", "en": "Prioritize stop commands, validate feedback after restart and reduce database operations."}, "0.1.0": {"de": "Erste Testversion: MQTT-Steuerung, Messwerte und auswählbare PV-/Akku-Datenquellen.", "en": "Initial test version: MQTT control, measurements and selectable PV/battery data sources."}},
+    "titleLang": {"de": "TeeNet", "en": "TeeNet"},
+    "desc": {"de": "TeeNet steuern und PV- sowie Akkuwerte verbinden.", "en": "Control TeeNet and connect PV and battery readings."},
+    "authors": ["stetastic"],
+    "keywords": ["wallbox", "mqtt", "pv", "TeeNet"],
+    "platform": "Javascript/Node.js",
+    "mode": "daemon",
+    "enabled": false,
+    "extIcon": "",
+    "icon": "teenet.png",
+    "type": "energy",
+    "tier": 2,
+    "compact": true,
+    "connectionType": "local",
+    "dataSource": "push",
+    "adminUI": {"config": "json"},
+    "supportCustoms": false,
+    "licenseInformation": {"license": "MIT", "type": "free"},
+    "dependencies": [{"js-controller": ">=6.0.0"}],
+    "globalDependencies": [{"admin": ">=7.0.0"}]
+  },
+  "native": {
+    "brokerHost": "", "brokerPort": 1883, "tls": false,
+    "brokerUsername": "", "brokerPassword": "", "topicPrefix": "wallbox-ems",
+    "readOnly": true, "telemetryTimeout": 90, "inputInterval": 10,
+    "pvEnabled": false, "pvState": "", "energyMaxAge": 90,
+    "batteryEnabled": false, "batterySocState": "", "batterySocMaxAge": 900,
+    "batteryPowerMode": "separate", "batteryPositive": "charge",
+    "batteryPowerState": "", "batteryChargeState": "", "batteryDischargeState": "",
+    "carEnabled": false, "carSocState": "", "carSocMaxAge": 1800
+  },
+  "encryptedNative": ["brokerPassword"],
+  "protectedNative": ["brokerPassword"],
+  "objects": [],
+  "instanceObjects": []
+}

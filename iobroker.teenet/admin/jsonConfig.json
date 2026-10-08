@@ -1,0 +1,50 @@
+{
+  "type": "tabs",
+  "i18n": true,
+  "items": {
+    "connection": {
+      "type": "panel", "label": "Verbindung",
+      "items": {
+        "_intro": {"type": "staticText", "text": "TeeNet und dieser Adapter verbinden sich mit demselben MQTT-Broker. Für weitere Geräte eine weitere Adapter-Instanz mit eigenem Topic-Präfix anlegen."},
+        "brokerHost": {"type": "text", "label": "MQTT-Broker: IP oder Hostname", "xs": 12, "sm": 8},
+        "brokerPort": {"type": "number", "label": "Port", "min": 1, "max": 65535, "xs": 12, "sm": 4},
+        "tls": {"type": "checkbox", "label": "TLS verwenden", "newLine": true},
+        "_tls": {"type": "staticText", "text": "Für TLS ist meist Port 8883 nötig. Das Serverzertifikat muss gültig sein.", "hidden": "!data.tls"},
+        "brokerUsername": {"type": "text", "label": "Benutzername", "xs": 12, "sm": 6, "newLine": true},
+        "brokerPassword": {"type": "password", "label": "Passwort", "visible": true, "xs": 12, "sm": 6},
+        "topicPrefix": {"type": "text", "label": "TeeNet Topic-Präfix", "help": "Muss mit der MQTT-Einstellung im ESP übereinstimmen.", "newLine": true},
+        "readOnly": {"type": "checkbox", "label": "Nur lesen (Steuerung deaktiviert)", "newLine": true},
+        "_commands": {"type": "staticText", "text": "Leistungsvorgaben starten den Manuellbetrieb. Ein Moduswechsel zu Manuell oder PV erteilt die Ladefreigabe. Nur eine Steuerung pro Gerät verwenden."}
+      }
+    },
+    "sources": {
+      "type": "panel", "label": "PV & Akku",
+      "items": {
+        "_sources": {"type": "staticText", "text": "Optional: vorhandene ioBroker-Datenpunkte auswählen. In TeeNet die passenden Anzeigen und „ioBroker oder Home Assistant“ als Datenquelle aktivieren. Frühere Weitergabe-Skripte für dieselben Werte ausschalten. Die Einstellung „Nur lesen“ betrifft die Wallbox-Befehle; ausgewählte Messwerte werden trotzdem weitergegeben."},
+        "pvEnabled": {"type": "checkbox", "label": "PV-Leistung weitergeben", "newLine": true},
+        "pvState": {"type": "objectId", "label": "PV-Erzeugung", "customFilter": {"type": "state", "common": {"type": "number"}}, "hidden": "!data.pvEnabled", "help": "Leistung in W oder kW. Die Einheit wird aus dem Datenpunkt übernommen."},
+        "batteryEnabled": {"type": "checkbox", "label": "Hausakkuwerte weitergeben", "newLine": true},
+        "batterySocState": {"type": "objectId", "label": "Hausakku-Ladezustand (%)", "customFilter": {"type": "state", "common": {"type": "number"}}, "hidden": "!data.batteryEnabled"},
+        "batteryPowerMode": {"type": "select", "label": "Akkuleistungsquelle", "options": [{"value": "separate", "label": "Laden und Entladen getrennt"}, {"value": "signed", "label": "Ein Wert mit Vorzeichen"}], "hidden": "!data.batteryEnabled"},
+        "batteryChargeState": {"type": "objectId", "label": "Akku-Ladeleistung (optional)", "customFilter": {"type": "state", "common": {"type": "number"}}, "hidden": "!data.batteryEnabled || data.batteryPowerMode !== 'separate'"},
+        "batteryDischargeState": {"type": "objectId", "label": "Akku-Entladeleistung (optional)", "customFilter": {"type": "state", "common": {"type": "number"}}, "hidden": "!data.batteryEnabled || data.batteryPowerMode !== 'separate'"},
+        "batteryPowerState": {"type": "objectId", "label": "Akkuleistung mit Vorzeichen (optional)", "customFilter": {"type": "state", "common": {"type": "number"}}, "hidden": "!data.batteryEnabled || data.batteryPowerMode !== 'signed'"},
+        "batteryPositive": {"type": "select", "label": "Positive Akkuleistung bedeutet", "options": [{"value": "charge", "label": "Laden"}, {"value": "discharge", "label": "Entladen"}], "hidden": "!data.batteryEnabled || data.batteryPowerMode !== 'signed'"},
+        "carEnabled": {"type": "checkbox", "label": "Fahrzeug-Ladezustand weitergeben", "newLine": true},
+        "carSocState": {"type": "objectId", "label": "Fahrzeug-Ladezustand (%)", "customFilter": {"type": "state", "common": {"type": "number"}}, "hidden": "!data.carEnabled"},
+        "_battery": {"type": "staticText", "text": "Die Datenweitergabe steuert den Wechselrichter nicht. TeeNet kann damit das Entladen des Hausakkus nicht sperren.", "hidden": "!data.batteryEnabled"}
+      }
+    },
+    "advanced": {
+      "type": "panel", "label": "Erweitert",
+      "items": {
+        "telemetryTimeout": {"type": "number", "label": "Verbindung gilt als veraltet nach (Sekunden)", "min": 45, "max": 300},
+        "inputInterval": {"type": "select", "label": "Messwerte weitergeben alle", "options": [{"value": 5, "label": "5 Sekunden"}, {"value": 10, "label": "10 Sekunden"}]},
+        "energyMaxAge": {"type": "number", "label": "Maximales Alter: PV-/Akkuleistung (Sekunden)", "min": 10, "max": 86400},
+        "batterySocMaxAge": {"type": "number", "label": "Maximales Alter: Hausakku-SOC (Sekunden)", "min": 10, "max": 86400},
+        "carSocMaxAge": {"type": "number", "label": "Maximales Alter: Fahrzeug-SOC (Sekunden)", "min": 10, "max": 86400},
+        "_age": {"type": "staticText", "text": "Das Alter zählt ab der letzten Aktualisierung durch den Quelladapter. Die lokale Weitergabe löst keine zusätzlichen Fahrzeug-Cloudabfragen aus."}
+      }
+    }
+  }
+}

@@ -3,7 +3,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-static void near(float a,float b) { assert(fabsf(a-b)<0.0001f); }
+static void near(float a,float b) { if(fabsf(a-b)>=0.0001f){fprintf(stderr,"Mismatch: %.6f != %.6f\n",a,b);assert(0);} }
 static const float charging[3]={8.1f,8.1f,8.1f},idle[3]={.2f,.2f,.2f};
 static void confirmed_stop(charge_guard_t *g,int64_t at) {
     for(int i=0;i<=10;i++)charge_guard_step(g,true,true,charging,8,at+i*1000);
@@ -59,11 +59,11 @@ int main(void) {
     next=runtime; next.current_offset_a=0; next.min_charge_a=7.1f;
     control_report(&runtime,charging,8.1f,0,false,out);
     control_report(&next,charging,7.3f,0,false,old);
-    near(out[0],32); near(old[0],32.8f); near(charging[0],8.1f);
-    /* 5.5 kW means 8 A at 230 V. The offset may not request 7.2 A on a
-       Wallbox whose commissioned minimum is 8 A. */
+    near(out[0],32.8f); near(old[0],32.8f); near(charging[0],8.1f);
+    /* Legacy migration keeps the earlier 8 A request consistent. Current
+       installations normalize the proven three-phase floor to 8.7 A. */
     float minimum_actual[3]={8,8,8};
-    control_report(&runtime,minimum_actual,8,0,false,out); near(out[0],32);
+    control_report(&runtime,minimum_actual,8,0,false,out); near(out[0],32.8f);
     near(control_target(&runtime,true,true,true),8.1f);
     runtime.manual_current_a=7.9f; near(control_target(&runtime,true,true,true),0);
     control_report(&runtime,idle,0,0,false,out); near(out[0],49);
@@ -125,17 +125,17 @@ int main(void) {
     manual_report_filter_t filter={0};float report[3]={24,24,24};
     manual_report_smooth(&filter,&saved,8,1000,report);near(report[0],24);
     report[0]=report[1]=report[2]=32;
-    manual_report_smooth(&filter,&saved,8,2000,report);near(report[0],24.15f);
+    manual_report_smooth(&filter,&saved,8,2000,report);near(report[0],24.05f);
     report[0]=report[1]=report[2]=32;
-    manual_report_smooth(&filter,&saved,11,3000,report);near(report[0],24.55f);
+    manual_report_smooth(&filter,&saved,11,3000,report);near(report[0],24.45f);
     report[0]=report[1]=report[2]=32;
-    manual_report_smooth(&filter,&saved,14,4000,report);near(report[0],24.75f);
+    manual_report_smooth(&filter,&saved,14,4000,report);near(report[0],24.65f);
     report[0]=report[1]=report[2]=20;
-    manual_report_smooth(&filter,&saved,8,5000,report);near(report[0],24.45f);
+    manual_report_smooth(&filter,&saved,8,5000,report);near(report[0],24.55f);
     report[0]=report[1]=report[2]=20;
-    manual_report_smooth(&filter,&saved,11,6000,report);near(report[0],23.65f);
+    manual_report_smooth(&filter,&saved,11,6000,report);near(report[0],23.75f);
     report[0]=report[1]=report[2]=20;
-    manual_report_smooth(&filter,&saved,14,7000,report);near(report[0],23.25f);
+    manual_report_smooth(&filter,&saved,14,7000,report);near(report[0],23.35f);
     report[0]=report[1]=report[2]=23.2f;
     manual_report_smooth(&filter,&saved,14,8000,report);near(report[0],23.2f);
     report[0]=report[1]=report[2]=47;

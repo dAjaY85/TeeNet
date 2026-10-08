@@ -1,5 +1,9 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const source=fs.readFileSync('main/dashboard.js','utf8');
+const html=fs.readFileSync('main/dashboard.html','utf8'),css=fs.readFileSync('main/dashboard.css','utf8');
+assert(!html.includes('name="homeassistant_enabled"'),'Home Assistant discovery has no misleading switch');
+assert(html.includes('ioBroker oder Home Assistant')&&html.includes('id="theme-dark"'));
+assert(source.includes("localStorage.setItem('teennet-theme'")&&css.includes('html[data-theme="dark"]'));
 function part(a,b){const start=source.indexOf(a),end=source.indexOf(b,start);assert(start>=0&&end>start);return source.slice(start,end);}
 const nodes={};for(const id of ['session-total','session-grid','session-solar','session-cost','session-page','session-rows','session-empty','sessions-prev','sessions-next','export-range','export-year','export-month','export-from','export-to'])nodes[id]={value:'',textContent:'old result',replaceChildren(){this.cleared=true;}};
 nodes['export-range'].value='custom';nodes['export-from'].value='2026-10-06';nodes['export-to'].value='2026-10-05';

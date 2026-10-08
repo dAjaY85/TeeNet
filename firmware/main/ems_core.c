@@ -13,8 +13,8 @@ void settings_defaults(settings_t *s) {
     s->wallbox_tx_pin=17; s->wallbox_rx_pin=18; s->wallbox_rts_pin=-1;
     s->xemex_tx_pin=4; s->xemex_rx_pin=5; s->xemex_rts_pin=-1;
     s->wallbox_address=s->xemex_address=1;
-    s->grid_limit_a=32; s->max_charge_a=16; s->min_charge_a=8;
-    s->manual_current_a=8; s->nominal_v=230; s->power_factor=1; s->price_kwh=0.25f; s->solar_price_kwh=0.08f;
+    s->grid_limit_a=32; s->max_charge_a=16; s->min_charge_a=8.7f;
+    s->manual_current_a=8.7f; s->nominal_v=230; s->power_factor=1; s->price_kwh=0.25f; s->solar_price_kwh=0.08f;
     strcpy(s->house_meter_type,"tasmota"); strcpy(s->house_meter_host,"192.168.1.77"); s->zero_reserve_w=0;
     s->battery_reserve_soc=50;
     s->current_offset_a=0.8f;
@@ -39,6 +39,7 @@ void settings_defaults(settings_t *s) {
 }
 static bool range(double n, double lo, double hi) { return isfinite(n) && n>=lo && n<=hi; }
 void settings_basic_mode(settings_t *s) {
+    if(!s->mqtt_enabled)s->mqtt_input_source=0;
     if(!s->battery_protect || !s->zero_feed_enabled)s->pv_allocation_enabled=false;
     if(!s->basic_mode)return;
     s->expert_mode=false; s->pv_allocation_enabled=false;
@@ -46,6 +47,7 @@ void settings_basic_mode(settings_t *s) {
     s->charge_plan_enabled=s->external_mode_input_enabled=s->evu_input_enabled=s->grid_guard_enabled=false;
     s->phase_switch_enabled=s->relay_board_enabled=false;
     s->huawei_enabled=s->huawei_battery=s->huawei_pv=false;
+    s->mqtt_input_source=0;
     /* An inactive Huawei/serial house meter must not reserve pins or require a host. */
     strcpy(s->house_meter_type,"tasmota");
     if(s->mode!=MODE_OFF && s->mode!=MODE_MANUAL){s->mode=MODE_OFF;s->enabled=false;}
@@ -668,10 +670,11 @@ void control_report(const settings_t *s,const float actual[3],float target,float
         bool feedback=range(actual[p],0,999);
         float minimum=s->min_charge_a;
         float desired=range(target,minimum,s->max_charge_a)?target:0;
-        /* The empirical offset must never take a live request below the
-           commissioned Wallbox minimum. At 5.5 kW / 8 A, subtracting 0.8 A
-           asked the Shell for 7.2 A and caused a physical charge stop. */
-        if(desired>0) desired=fmaxf(minimum,desired-s->current_offset_a);
+        /* The target is the measured vehicle current. The Shell/Xemex path
+           settles above its DLB request, so compensate that measured offset.
+           The protocol floor remains 6 A; the commissioned 8 A floor applies
+           to the measured target and must not suppress this compensation. */
+        if(desired>0) desired=fmaxf(EMS_MIN_CHARGE_A,desired-s->current_offset_a);
         /* A stop must remove the entire configured charging headroom, including
            while the car is still drawing current. A 1 A overload is only a
            small reduction request, not an unambiguous zero-headroom request.
@@ -852,7 +855,11 @@ void manual_report_smooth(manual_report_filter_t *filter,const settings_t *s,flo
     if(!filter->active||now<=filter->last_ms||now-filter->last_ms>5000) {
         memcpy(filter->reported,report,sizeof(filter->reported));filter->last_ms=now;filter->active=true;return;
     }
-    float rate=target<9?0.15f:target<13?0.4f:0.2f;
+    /* Near the proven 6 kW three-phase floor, approach the final limit particularly
+       gently. The car first starts with useful headroom; TeeNet then closes
+       the remaining error at 0.05 A/s. Mid-range changes stay responsive and
+       the upper range retains its calmer proven ramp. */
+    float rate=target<=8.8f?0.05f:target<9?0.15f:target<13?0.4f:0.2f;
     for(int p=0;p<3;p++) {
         float delta=report[p]-filter->reported[p];
         /* Lower simulated grid load grants MORE charging current. Only that

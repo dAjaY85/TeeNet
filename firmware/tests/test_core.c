@@ -30,7 +30,7 @@ int main(void) {
     near(control_target(&s,true,true,true),16); near(control_target(&s,false,true,true),0);
     near(control_target(&s,true,false,true),0); s.mode=MODE_PV; s.pv_surplus_a=16;
     near(control_target(&s,true,true,false),0); s.pv_surplus_a=7; near(control_target(&s,true,true,true),0);
-    s.mode=MODE_MANUAL; s.manual_current_a=8;
+    s.mode=MODE_MANUAL; s.min_charge_a=8; s.manual_current_a=8;
     s.current_offset_a=0; /* baseline without installation-specific calibration */
     float out[3];
     /* Shell receives grid current. Fresh total house power minus Wallbox current
@@ -65,8 +65,8 @@ int main(void) {
     s.min_charge_a=8; assert(settings_valid(&s));
     control_report(&s,charging,7,0,false,out); near(out[0],49);
     control_report(&s,charging,0,0,false,out); near(out[0],49);
-    /* A confirmed one-phase position counts L1 once, keeps the 8 A floor,
-       and keeps the commissioned 8 A floor and its offset clamp. */
+    /* A confirmed one-phase position counts L1 once and compensates the
+       measured offset while retaining the 8 A measured-current floor. */
     s.phase_switch_enabled=true; s.relay_board_enabled=true; s.relay1_mode=3; s.charge_phases=1; s.manual_phases=1;
     s.manual_current_a=6; s.current_offset_a=.8f;
     assert(settings_valid(&s));
@@ -75,7 +75,7 @@ int main(void) {
     float single[]={8.5f,8.5f,8.5f};
     near(estimated_charge_power(&s,single),8.5f*230);
     control_report(&s,single,8,0,false,out);
-    near(out[0],32.5); near(out[1],0); near(out[2],0);
+    near(out[0],33.3); near(out[1],0); near(out[2],0);
     assert(settings_decode(&s,sizeof(s),&migrated));
     assert(migrated.phase_switch_enabled && migrated.charge_phases==3 && migrated.manual_phases==3 && !migrated.enabled);
     s.phase_switch_enabled=false; s.charge_phases=3; s.manual_phases=3; s.current_offset_a=0;

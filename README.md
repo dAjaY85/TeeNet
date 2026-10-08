@@ -1,4 +1,4 @@
-# TeeNet 1.13
+# TeeNet 1.14
 
 Lokale ESP32-S3-Steuerung für die **Shell Recharge Advanced 3.0**.
 
@@ -7,7 +7,7 @@ Lokale ESP32-S3-Steuerung für die **Shell Recharge Advanced 3.0**.
 ## Funktionen
 
 - Ladeleistung manuell einstellen oder automatisch mit PV-Überschuss laden.
-- Über ioBroker und Home Assistant per MQTT steuern.
+- Über den ioBroker-Adapter oder Home Assistant per MQTT steuern.
 - PV- und Akkudaten von OpenDTU-OnBattery per MQTT nutzen.
 - Hausakku einbeziehen und PV-Leistung zwischen Hausakku und Auto aufteilen.
 - Optional Ladeplan, Wolkenpuffer und automatische Phasenumschaltung nutzen.
@@ -25,7 +25,7 @@ Empfohlen wird der erprobte **ESP32-S3 N16R8 mit 16 MB Flash** und USB-Versorgun
 
 Ein **separater Zähler am Wallbox-Abgang** ist für die Regelung erforderlich. Die Shell muss für externes dynamisches Lastmanagement eingerichtet sein. Unterstützte Zähler und Anschlüsse beschreibt die [Anleitung](https://teennet-demo.stetastic.chatgpt.site/help).
 
-Am Referenzaufbau erprobt: dreiphasig 5,5–11 kW, einphasig 2,0–3,5 kW. Der nutzbare Bereich hängt von Fahrzeug und Aufbau ab. Details stehen im [Messprotokoll](https://github.com/stetastic/TeeNet/blob/main/Probelauf.md).
+Am Referenzaufbau erprobt: dreiphasig 6–11 kW, einphasig 2,0–3,5 kW. Der nutzbare Bereich hängt von Fahrzeug und Aufbau ab. Details stehen im [Messprotokoll](https://github.com/stetastic/TeeNet/blob/main/Probelauf.md).
 
 ## Hinweis
 

@@ -1,0 +1,18 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const root = path.join(__dirname, '..');
+const pkg = require('../package.json');
+const artifacts = path.join(root, 'artifacts');
+const stage = path.join(artifacts, 'stage', 'package');
+fs.mkdirSync(stage, { recursive: true });
+const whitelist = ['package.json', 'io-package.json', 'main.js', 'lib', 'admin', 'README.md', 'LICENSE'];
+for (const item of whitelist) fs.cpSync(path.join(root, item), path.join(stage, item), { recursive: true });
+const output = path.join(artifacts, `${pkg.name}-${pkg.version}.tgz`);
+const r = spawnSync('tar', ['-czf', output, '-C', path.dirname(stage), 'package'], { encoding: 'utf8' });
+if (r.status !== 0) throw new Error(r.stderr);
+const crypto = require('node:crypto');
+const sha256 = crypto.createHash('sha256').update(fs.readFileSync(output)).digest('hex');
+fs.writeFileSync(path.join(artifacts, 'SHA256SUMS.txt'), `${sha256}  ${path.basename(output)}\n`);
+console.log(JSON.stringify({ package: output, bytes: fs.statSync(output).size, sha256 }));

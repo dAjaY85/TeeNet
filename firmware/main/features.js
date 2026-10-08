@@ -8,10 +8,12 @@
   const steps=[
     {title:'Funktionen auswählen',groups:['equipment-settings'],help:'Grundfunktionen für Manuell und MQTT. Zusatzfunktionen für PV und Erweiterungen.'},
     {title:'WLAN einrichten',groups:['connection-settings'],help:'Heimnetz wählen und Passwort speichern. Bereits verbunden? Weiter.'},
-    {title:'Datenquellen verbinden',groups:['mqtt-settings'],help:'Für ioBroker oder Home Assistant den MQTT-Broker eintragen. Sonst überspringen.'},
     {title:'Shell-Wallbox',groups:['shell-settings'],help:'Shell suchen und ihre Stromgrenzen übernehmen. Ohne Netzwerk die Werte aus der Shell-Einstellung eintragen.'},
     {title:'Wallbox-Zähler',groups:['meter-settings'],help:'Separaten Zähler am Wallbox-Abgang auswählen und Messwerte prüfen.'},
     {title:'Hausanschluss und PV',groups:['house-settings'],when:f=>!isBasic(f)&&(f.zero_feed_enabled.checked||f.grid_guard_enabled.checked),help:'Hauszähler auswählen und Netzbezug sowie Einspeisung prüfen.'},
+    {title:'Smart Home verbinden',groups:['mqtt-settings'],help:'Für ioBroker, Home Assistant oder OpenDTU den gemeinsamen MQTT-Broker eintragen. Sonst MQTT ausschalten.'},
+    {title:'OpenDTU-OnBattery',groups:['opendtu-settings'],when:f=>!isBasic(f)&&Number(f.mqtt_input_source.value)===2,help:'Topic-Präfix aus OpenDTU übernehmen. Für die PV-Anzeige das Topic der reinen Solarleistung eintragen.'},
+    {title:'Huawei SUN2000',groups:['huawei-settings'],when:f=>!isBasic(f)&&f.huawei_enabled.checked,help:'Wechselrichter suchen, gewünschte Messwerte auswählen und Verbindung prüfen.'},
     {title:'Hausakku einstellen',groups:['battery-settings'],when:f=>f.battery_protect.checked,help:'Entladegrenze und Leistung festlegen. Die Nutzung später in der Übersicht einschalten.'},
     {title:'Preise und Leistung',groups:['consumption-settings'],help:'Spannung und aktuelle Preise eintragen. Bisherige Kosten bleiben erhalten.'},
     {title:'Fahrzeug-Akkuanzeige',groups:['vehicle-settings'],when:f=>f.vehicle_soc_enabled.checked,help:'Fahrzeug-Ladezustand per MQTT senden. Anleitung unten öffnen.'},
@@ -177,7 +179,8 @@
     const f=$('config-form').elements,active=selectedSteps(),step=active[wizardStep];
     for(const id of step.groups){const group=$(id);for(const field of group.querySelectorAll('input,select')){if(field.type!=='file'&&field.getClientRects().length&&field.willValidate&&!field.checkValidity()){field.reportValidity();return;}}}
     if(step.groups.includes('house-settings')&&f.zero_feed_enabled.checked){const type=f.house_meter_type.value;if(type==='xemex'){toast('Xemex kann den Stromschutz übernehmen; für PV eine Quelle mit Energierichtung wählen.',true);return;}if(['tasmota','shelly_gen2','shelly_em1','em24_tcp'].includes(type)&&!f.house_meter_host.value.trim()){toast('Hauszähler suchen oder seine Adresse eintragen.',true);return;}}
-    if(step.groups.includes('mqtt-settings')&&f.huawei_enabled.checked&&(!f.huawei_host.value.trim()||!Number.isInteger(Number(f.huawei_unit_id.value)))){toast('Huawei suchen oder Adresse und Modbus-Adresse eintragen.',true);return;}
+    if(step.groups.includes('huawei-settings')&&f.huawei_enabled.checked&&(!f.huawei_host.value.trim()||!Number.isInteger(Number(f.huawei_unit_id.value)))){toast('Huawei suchen oder Adresse und Modbus-Adresse eintragen.',true);return;}
+    if(step.groups.includes('opendtu-settings')&&(!f.opendtu_prefix.value.trim()||(f.pv_display_enabled.checked&&!f.opendtu_pv_topic.value.trim()))){toast('OpenDTU-Präfix und für die PV-Anzeige ein Leistungstopic eintragen.',true);return;}
     if(step.groups.includes('mqtt-settings')&&f.mqtt_enabled.checked&&!/^mqtts?:\/\//.test(f.mqtt_uri.value)){toast('MQTT-Broker eintragen oder MQTT ausschalten.',true);return;}
     if(wizardStep===active.length-1){
       if($('config-form').reportValidity())$('config-form').requestSubmit();

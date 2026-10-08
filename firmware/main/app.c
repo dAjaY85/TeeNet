@@ -308,8 +308,16 @@ static void load_settings(void) {
     settings.wallbox_address=1;
     settings.house_xemex_coils=3;
     settings.reserved_http_meter_enabled=false;
+    /* Repeated vehicle tests established 6.0 kW as the reliable three-phase
+       floor. Normalize earlier 8.0/8.8 A commissioning values accordingly. */
+    if(settings.min_charge_a>=8.0f && settings.min_charge_a<=8.81f)
+        settings.min_charge_a=8.7f;
+    if(settings.manual_current_a>0 && settings.manual_current_a<settings.min_charge_a)
+        settings.manual_current_a=settings.min_charge_a;
     settings.reserved_http_meter_host[0]=0;
     settings.reserved_feedback_source=0;
+    if(settings.mqtt_input_source==1)settings.mqtt_input_source=0;
+    settings.homeassistant_enabled=settings.mqtt_enabled;
     saved_settings=settings;
 
 }
@@ -1507,16 +1515,16 @@ static void homeassistant_discovery(bool enabled) {
     o=homeassistant_entity("Wallbox-Kommunikation","wallbox","sensor/wallbox_ok");
     cJSON_AddStringToObject(o,"payload_on","true");cJSON_AddStringToObject(o,"payload_off","false");cJSON_AddStringToObject(o,"device_class","connectivity");
     homeassistant_publish_entity("binary_sensor","wallbox",o,true);
-    o=homeassistant_entity("ZÃƒÂ¤hlerdaten","meter","sensor/meter_ok");
+    o=homeassistant_entity("Zählerdaten","meter","sensor/meter_ok");
     cJSON_AddStringToObject(o,"payload_on","true");cJSON_AddStringToObject(o,"payload_off","false");cJSON_AddStringToObject(o,"device_class","connectivity");
     homeassistant_publish_entity("binary_sensor","meter",o,true);
     o=homeassistant_entity("Betriebsart","mode","sensor/mode");
     char topic[160];snprintf(topic,sizeof(topic),"%s/command/mode",settings.mqtt_prefix);cJSON_AddStringToObject(o,"command_topic",topic);
     cJSON *options=cJSON_AddArrayToObject(o,"options");cJSON_AddItemToArray(options,cJSON_CreateString("off"));cJSON_AddItemToArray(options,cJSON_CreateString("manual"));cJSON_AddItemToArray(options,cJSON_CreateString("pv"));
     homeassistant_publish_entity("select","mode",o,true);
-    o=homeassistant_entity("GewÃƒÂ¼nschte Ladeleistung","charging_power_setpoint","sensor/manual_power_kw");
+    o=homeassistant_entity("Gewünschte Ladeleistung","charging_power_setpoint","sensor/manual_power_kw");
     snprintf(topic,sizeof(topic),"%s/command/power_kw",settings.mqtt_prefix);cJSON_AddStringToObject(o,"command_topic",topic);
-    cJSON_AddNumberToObject(o,"min",(settings.phase_switch_enabled || settings.fixed_charge_phases==1)?2.0:5.5);
+    cJSON_AddNumberToObject(o,"min",(settings.phase_switch_enabled || settings.fixed_charge_phases==1)?2.0:6.0);
     cJSON_AddNumberToObject(o,"max",floorf(settings.max_charge_a*(settings.phase_switch_enabled?3:settings.fixed_charge_phases)*settings.nominal_v*settings.power_factor/500)/2);
     cJSON_AddNumberToObject(o,"step",0.5);cJSON_AddStringToObject(o,"unit_of_measurement","kW");cJSON_AddStringToObject(o,"mode","slider");
     homeassistant_publish_entity("number","charging_power_setpoint",o,true);
@@ -1532,10 +1540,10 @@ static void homeassistant_discovery(bool enabled) {
     o=homeassistant_entity("PV-Erzeugung","pv_generation","sensor/pv_generation_w");
     cJSON_AddStringToObject(o,"device_class","power");cJSON_AddStringToObject(o,"state_class","measurement");cJSON_AddStringToObject(o,"unit_of_measurement","W");
     homeassistant_publish_entity("sensor","pv_generation",o,true);
-    o=homeassistant_entity("Hausakku lÃƒÂ¤dt","battery_charge","sensor/battery_charge_w");
+    o=homeassistant_entity("Hausakku lädt","battery_charge","sensor/battery_charge_w");
     cJSON_AddStringToObject(o,"device_class","power");cJSON_AddStringToObject(o,"state_class","measurement");cJSON_AddStringToObject(o,"unit_of_measurement","W");
     homeassistant_publish_entity("sensor","battery_charge",o,true);
-    o=homeassistant_entity("Hausakku entlÃƒÂ¤dt","battery_discharge","sensor/battery_discharge_w");
+    o=homeassistant_entity("Hausakku entlädt","battery_discharge","sensor/battery_discharge_w");
     cJSON_AddStringToObject(o,"device_class","power");cJSON_AddStringToObject(o,"state_class","measurement");cJSON_AddStringToObject(o,"unit_of_measurement","W");
     homeassistant_publish_entity("sensor","battery_discharge",o,true);
 }
@@ -1759,7 +1767,7 @@ static bool mqtt_input(const char *suffix,const char *payload) {
         if(parsed){
             double half=round(value*2)/2;
             unsigned phases=settings.phase_switch_enabled?(value>0 && value<=3.5?1:3):settings.fixed_charge_phases;
-            double minimum=phases==1?2.0:5.5;
+            double minimum=phases==1?2.0:6.0;
             parsed=(value==0 || (value>=minimum && (phases==3 || value<=3.5) && fabs(value-half)<.001)) &&
                 half<=settings.max_charge_a*phases*settings.nominal_v*settings.power_factor/1000.0+.05;
             if(parsed){
@@ -2073,7 +2081,11 @@ static esp_err_t config_apply(httpd_req_t *req,cJSON *o,bool restore) {
     /* The legacy combined /state topic was removed from the user interface. */
     next.mqtt_state_json=false;
     if(!next.relay_board_enabled) next.phase_switch_enabled=false;
-    if(!next.mqtt_enabled){next.vehicle_soc_enabled=false;next.homeassistant_enabled=false;
+    /* Home Assistant discovery follows MQTT automatically. The former switch
+       was misleading because retained entities may remain visible in HA. */
+    next.homeassistant_enabled=next.mqtt_enabled;
+    if(next.mqtt_input_source==1)next.mqtt_input_source=0;
+    if(!next.mqtt_enabled){next.vehicle_soc_enabled=false;
         if(!(next.huawei_enabled && next.huawei_pv))next.pv_display_enabled=false;
         if(!(next.huawei_enabled && next.huawei_battery))next.battery_protect=false;}
     next.enabled=false; next.mode=MODE_OFF; next.pv_surplus_a=0;
@@ -2910,6 +2922,10 @@ static void start_wifi(void) {
     if(settings.wifi_ssid[0]) {
 
         wifi_config_t sta={0}; strcpy((char *)sta.sta.ssid,settings.wifi_ssid); strcpy((char *)sta.sta.password,settings.wifi_password);
+        /* Fritz mesh nodes share one SSID. Scan every channel and choose the
+           strongest matching AP instead of reusing a weak cached channel. */
+        sta.sta.scan_method=WIFI_ALL_CHANNEL_SCAN;
+        sta.sta.sort_method=WIFI_CONNECT_AP_BY_SIGNAL;
 
         ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA,&sta));
 
@@ -2931,7 +2947,7 @@ static void start_wifi(void) {
 
 static void maintain_wifi(int64_t now) {
 
-    static int64_t retry_at;
+    static int64_t retry_at,signal_at,weak_since,last_roam;
 
     /* Scans and changes of radio mode must never overlap. */
 
@@ -2942,6 +2958,7 @@ static void maintain_wifi(int64_t now) {
     if(ap_requested) { wifi_ap_forced=true; ap_requested=false; }
 
     bool online=wifi_online,configured=settings.wifi_ssid[0]!=0,forced=wifi_ap_forced;
+    bool charging=settings.enabled;
 
     ems_wifi_mode_t wanted=wifi_recovery_mode(configured,online,forced,now,wifi_lost_at);
 
@@ -2964,6 +2981,19 @@ static void maintain_wifi(int64_t now) {
     LOCK(); wifi_fallback=err==ESP_OK && wanted==EMS_WIFI_AP_STA; UNLOCK();
 
     if(err==ESP_OK && configured && !online && !forced && now-retry_at>=10000) { esp_wifi_connect(); retry_at=now; }
+
+    /* A mains-powered idle controller may roam away from a persistently weak
+       mesh node. Never interrupt an active charging session for this. */
+    if(err==ESP_OK && online && !forced && !charging && now-signal_at>=10000) {
+        wifi_ap_record_t ap_info={0};signal_at=now;
+        if(esp_wifi_sta_get_ap_info(&ap_info)==ESP_OK && ap_info.rssi<=-78) {
+            if(!weak_since)weak_since=now;
+            if(now-weak_since>=120000 && now-last_roam>=600000) {
+                ESP_LOGW(TAG,"Weak WLAN (%d dBm); selecting a stronger mesh AP",ap_info.rssi);
+                weak_since=0;last_roam=now;esp_wifi_disconnect();retry_at=now-10000;
+            }
+        } else weak_since=0;
+    } else if(!online || charging) weak_since=0;
 
     xSemaphoreGive(wifi_action_lock);
 

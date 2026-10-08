@@ -4,6 +4,15 @@ const $=id=>document.getElementById(id);
 
 const format=(value,digits=2)=>typeof value==='number'&&Number.isFinite(value)?value.toLocaleString('de-DE',{minimumFractionDigits:digits,maximumFractionDigits:digits}):'—';
 
+function setTheme(theme){
+  const selected=theme==='dark'?'dark':'light';document.documentElement.dataset.theme=selected;
+  try{localStorage.setItem('teennet-theme',selected);}catch(error){}
+  $('theme-light')?.setAttribute('aria-pressed',String(selected==='light'));
+  $('theme-dark')?.setAttribute('aria-pressed',String(selected==='dark'));
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',selected==='dark'?'#0e1821':'#f2f7fa');
+  drawCharts();
+}
+
 const reasons={maintenance:'Wartung läuft · Ladung gesperrt.',reboot:'Gespeichert · Neustart erforderlich.',unsupported_meter:'Zählerprofil nicht unterstützt · Regelung gesperrt.',house_meter:'Hauszählerdaten fehlen · PV-Laden pausiert.',commissioning:'Einrichtung läuft · Regelung bis zur Prüfung an der Wallbox gesperrt.',uart:'RS485-Schnittstelle nicht bereit · Regelung gesperrt.',meter:'Wallbox-Messwert fehlt · Laden pausiert.',feedback:'Wallbox-Strommessung fehlt · Regelung gesperrt.',off:'Laderegelung ausgeschaltet.',pv_stale:'PV-Sollwert veraltet · Regelung gesperrt.',below_minimum:'Sollwert unter Mindeststrom · Stop-Anforderung aktiv.',none:'Regelung aktiv · frische Messwerte vorhanden.'};
 Object.assign(reasons,{evu_stop:'EVU-Kontakt aktiv · Ladung gestoppt.',grid_fallback:'Haus-Phasenwerte fehlen oder sind veraltet · Laden bis 8 kW.'});
 
@@ -194,7 +203,7 @@ function render(){if(!state)return;const s=state,valid=online;
   $('house-battery-value').textContent=`${format(batteryFlow==='unknown'?null:Math.max(0,Math.abs(charge-discharge))/1000,2)} kW`;
 
 
-  const mqttSource=s.mqtt_input_source==='opendtu'?'OpenDTU':s.mqtt_input_source==='homeassistant'?'Home Assistant':'ioBroker';
+  const mqttSource=s.mqtt_input_source==='opendtu'?'OpenDTU':'Smart Home';
   const signal=Number.isFinite(s.wifi_rssi_dbm)?` · ${s.wifi_rssi_dbm} dBm`:'';
   const diagnostics=[diagnostic('Heimnetz',s.wifi_ok?`${s.station_ip}${signal}`:'Nicht verbunden'),diagnostic('Uhrzeit',s.clock_ok?'Synchronisiert':'Warte auf Internetzeit'),diagnostic('MQTT',s.mqtt_ok?`Verbunden · ${mqttSource}`:`Nicht verbunden · ${mqttSource}`),diagnostic('Wallbox',s.wallbox_ok?'Kommunikation OK':'Keine aktuellen Abfragen'),diagnostic('Wallbox-Zähler',s.feedback_ok?'Daten aktuell':'Daten fehlen'),diagnostic('Hauszähler',s.house_meter_ok?'Daten aktuell':s.zero_feed_enabled||s.grid_guard_enabled?'Daten fehlen':'Nicht benötigt'),diagnostic('Speicherung',s.storage_ok?'Bereit':'Fehler'),...(s.huawei_enabled?[diagnostic('Huawei',s.huawei_ok?s.huawei_model:'Keine aktuellen Daten')]:[])];
   if(s.external_mode_input_enabled)diagnostics.push(diagnostic('Betriebsart-Kontakt',s.external_mode_contact?'PV-Überschuss':'Manuell'));
@@ -207,15 +216,16 @@ function render(){if(!state)return;const s=state,valid=online;
 
 }
 
-function chartBase(canvas,max,unit){const rect=canvas.getBoundingClientRect(),ratio=window.devicePixelRatio||1;canvas.width=Math.round(rect.width*ratio);canvas.height=Math.round(rect.height*ratio);const c=canvas.getContext('2d');c.scale(ratio,ratio);const w=rect.width,h=rect.height,left=44,right=12,top=17,bottom=30;const plot={x:left,y:top,w:w-left-right,h:h-top-bottom};c.font='10px system-ui';c.fillStyle='#89968e';c.fillText(unit,3,10);for(let i=0;i<=4;i++){const y=top+plot.h*i/4;c.strokeStyle='#edf1ed';c.beginPath();c.moveTo(left,y);c.lineTo(w-right,y);c.stroke();c.fillStyle='#88978d';c.fillText(format(max*(1-i/4),max>=10?0:1),3,y+4);}return {c,plot,w,h};}
+function chartColors(){return document.documentElement.dataset.theme==='dark'?{text:'#a4b7c6',grid:'#304454',line:'#54c5e3',fill:'#54c5e31c'}:{text:'#728378',grid:'#edf1ed',line:'#438b70',fill:'#2c806717'};}
+function chartBase(canvas,max,unit){const rect=canvas.getBoundingClientRect(),ratio=window.devicePixelRatio||1;canvas.width=Math.round(rect.width*ratio);canvas.height=Math.round(rect.height*ratio);const c=canvas.getContext('2d'),colors=chartColors();c.scale(ratio,ratio);const w=rect.width,h=rect.height,left=44,right=12,top=17,bottom=30;const plot={x:left,y:top,w:w-left-right,h:h-top-bottom};c.font='10px system-ui';c.fillStyle=colors.text;c.fillText(unit,3,10);for(let i=0;i<=4;i++){const y=top+plot.h*i/4;c.strokeStyle=colors.grid;c.beginPath();c.moveTo(left,y);c.lineTo(w-right,y);c.stroke();c.fillStyle=colors.text;c.fillText(format(max*(1-i/4),max>=10?0:1),3,y+4);}return {c,plot,w,h};}
 
 function drawCharts(){if(!$('statistics').hidden&&!document.hidden)drawPower();}
 
 function drawPower(){const key=source===0?'estimate_w':'wallbox_w',points=history.points||[],values=points.filter(p=>p[key]!==null).map(p=>p[key]/1000);const max=Math.max(1,...values)*1.15,{c,plot}=chartBase($('power-chart'),max,'kW');$('power-empty').hidden=values.length>0;let previous=null;
 
-  points.forEach(p=>{const value=p[key];if(value===null){previous=null;return;}const x=plot.x+plot.w*(1-p.age_min/119),y=plot.y+plot.h*(1-value/1000/max);if(previous&&previous.age-p.age_min===1){c.fillStyle='#2c806717';c.beginPath();c.moveTo(previous.x,plot.y+plot.h);c.lineTo(previous.x,previous.y);c.lineTo(x,y);c.lineTo(x,plot.y+plot.h);c.closePath();c.fill();c.strokeStyle='#438b70';c.lineWidth=2;c.beginPath();c.moveTo(previous.x,previous.y);c.lineTo(x,y);c.stroke();}c.fillStyle='#438b70';c.beginPath();c.arc(x,y,2.3,0,Math.PI*2);c.fill();previous={x,y,age:p.age_min};});
+  const colors=chartColors();points.forEach(p=>{const value=p[key];if(value===null){previous=null;return;}const x=plot.x+plot.w*(1-p.age_min/119),y=plot.y+plot.h*(1-value/1000/max);if(previous&&previous.age-p.age_min===1){c.fillStyle=colors.fill;c.beginPath();c.moveTo(previous.x,plot.y+plot.h);c.lineTo(previous.x,previous.y);c.lineTo(x,y);c.lineTo(x,plot.y+plot.h);c.closePath();c.fill();c.strokeStyle=colors.line;c.lineWidth=2;c.beginPath();c.moveTo(previous.x,previous.y);c.lineTo(x,y);c.stroke();}c.fillStyle=colors.line;c.beginPath();c.arc(x,y,2.3,0,Math.PI*2);c.fill();previous={x,y,age:p.age_min};});
 
-  c.fillStyle='#8b978f';c.textAlign='left';c.fillText('−2 h',plot.x,plot.y+plot.h+22);c.textAlign='center';c.fillText('−1 h',plot.x+plot.w/2,plot.y+plot.h+22);c.textAlign='right';c.fillText('Jetzt',plot.x+plot.w,plot.y+plot.h+22);$('power-chart').title=values.length?`${values.length} Minuten mit Daten. Höchstes Minutenmittel: ${format(Math.max(...values))} kW.`:'Keine Messdaten';}
+  c.fillStyle=colors.text;c.textAlign='left';c.fillText('−2 h',plot.x,plot.y+plot.h+22);c.textAlign='center';c.fillText('−1 h',plot.x+plot.w/2,plot.y+plot.h+22);c.textAlign='right';c.fillText('Jetzt',plot.x+plot.w,plot.y+plot.h+22);$('power-chart').title=values.length?`${values.length} Minuten mit Daten. Höchstes Minutenmittel: ${format(Math.max(...values))} kW.`:'Keine Messdaten';}
 
 let sessionOffset=0,sessionCount=0,sessionsBusy=false;
 function selectedPeriod(){return $('export-range').value==='year'?$('export-year').value:$('export-month').value;}
@@ -308,6 +318,7 @@ const additionalFeatureFields=['pv_allocation_enabled','zero_feed_enabled','char
 function normalizeBasicFields(){
  const f=$('config-form').elements;if(f.basic_mode.value!=='true')return;
  for(const name of additionalFeatureFields)f[name].checked=false;
+ f.mqtt_input_source.value='0';$('opendtu-enabled').checked=false;
  f.house_meter_type.value='tasmota';
 }
 function updateFunctionMode(){
@@ -337,7 +348,16 @@ function updateEquipment(){const f=$('config-form').elements,checked=name=>f[nam
 
  $('house-settings').hidden=basic||!(checked('zero_feed_enabled')||checked('grid_guard_enabled'));$('maintenance').hidden=false;$('diagnostic-settings').hidden=!expert;
 
- $('huawei-settings').hidden=!checked('huawei_enabled');$('opendtu-settings').hidden=basic||Number(f.mqtt_input_source.value)!==2;
+ $('huawei-settings').hidden=basic||!checked('huawei_enabled');
+ const opendtu=Number(f.mqtt_input_source.value)===2;
+ $('opendtu-enabled').checked=opendtu;$('opendtu-settings').hidden=basic||!opendtu;
+ $('opendtu-pv-settings').hidden=!checked('pv_display_enabled');
+ $('opendtu-current-field').hidden=!checked('battery_protect');
+ const huaweiOverrides=checked('huawei_enabled')&&((checked('huawei_battery')&&checked('battery_protect'))||(checked('huawei_pv')&&checked('pv_display_enabled')));
+ $('opendtu-source-note').hidden=!huaweiOverrides;
+ $('opendtu-source-note').textContent='Für die in der Huawei-Kachel aktivierten Messwerte hat Huawei Vorrang vor OpenDTU.';
+ $('pv-control-settings').hidden=!checked('zero_feed_enabled');
+ $('phase-feedback-type').hidden=!checked('phase_feedback_enabled');
  if(f.house_meter_type.value==='huawei'){$('house-host-field').hidden=true;}
  const network=['tasmota','shelly_gen2','shelly_em1','em24_tcp'].includes(f.house_meter_type.value);
  const networkWallbox=f.wallbox_meter_type.value.startsWith('shelly_')||f.wallbox_meter_type.value==='em24_tcp';
@@ -364,9 +384,10 @@ function updateEquipment(){const f=$('config-form').elements,checked=name=>f[nam
 
 $('config-form').addEventListener('change',e=>{
  const f=$('config-form').elements,name=e.target.name;
+ if(e.target.id==='opendtu-enabled'){f.mqtt_input_source.value=e.target.checked?'2':'0';if(e.target.checked)f.mqtt_enabled.checked=true;}
  if(name==='phase_switch_enabled'&&f.phase_switch_enabled.checked){f.relay_board_enabled.checked=true;f.relay1_mode.value='3';}
  if(name==='relay_board_enabled'&&!f.relay_board_enabled.checked)f.phase_switch_enabled.checked=false;
- if(name==='mqtt_enabled'&&!f.mqtt_enabled.checked){for(const n of ['vehicle_soc_enabled','homeassistant_enabled'])f[n].checked=false;if(!(f.huawei_enabled.checked&&f.huawei_battery.checked))f.battery_protect.checked=false;if(!(f.huawei_enabled.checked&&f.huawei_pv.checked))f.pv_display_enabled.checked=false;}
+ if(name==='mqtt_enabled'&&!f.mqtt_enabled.checked){f.mqtt_input_source.value='0';f.vehicle_soc_enabled.checked=false;if(!(f.huawei_enabled.checked&&f.huawei_battery.checked))f.battery_protect.checked=false;if(!(f.huawei_enabled.checked&&f.huawei_pv.checked))f.pv_display_enabled.checked=false;}
  if(name==='house_meter_type'&&f.house_meter_type.value==='huawei')f.huawei_enabled.checked=true;
  if(name==='huawei_enabled'&&!f.huawei_enabled.checked){f.huawei_battery.checked=false;f.huawei_pv.checked=false;if(f.house_meter_type.value==='huawei'){f.house_meter_type.value='tasmota';f.house_meter_host.value='';f.zero_feed_enabled.checked=false;}if(!f.mqtt_enabled.checked){f.battery_protect.checked=false;f.pv_display_enabled.checked=false;}}
  if(name==='huawei_battery'&&f.huawei_battery.checked){f.huawei_enabled.checked=true;f.battery_protect.checked=true;f.zero_feed_enabled.checked=true;f.zero_reserve_w.value='0';}
@@ -376,26 +397,26 @@ $('config-form').addEventListener('change',e=>{
   const supported=['xemex','sdm630','sdm630mct','shelly_gen2','huawei','em24_tcp'].includes(f.house_meter_type.value);
   if(!supported){f.grid_guard_enabled.checked=false;toast('Hausanschlussschutz benötigt drei gemessene Phasenströme.',true);}
  }
- if(['vehicle_soc_enabled','homeassistant_enabled'].includes(name)&&f[name].checked)f.mqtt_enabled.checked=true;
+ if(name==='vehicle_soc_enabled'&&f[name].checked)f.mqtt_enabled.checked=true;
  if(name==='pv_display_enabled'&&f[name].checked&&!(f.huawei_enabled.checked&&f.huawei_pv.checked))f.mqtt_enabled.checked=true;
  updateEquipment();
 });
-async function loadConfig(){const cfg=await api('/api/config');configBaseline=cfg;for(const [name,value] of Object.entries(cfg)){const el=$('config-form').elements.namedItem(name);if(!el)continue;if(el.type==='checkbox')el.checked=value;else if(el.hasAttribute('data-boolean'))el.value=String(!!value);else if(el.type==='number'){const scale=Number(el.dataset.scale)||1;el.value=Number((Number(value)/scale).toFixed(4));}else if(!el.hasAttribute('data-secret')){if(el.tagName==='SELECT'&&!Array.from(el.options).some(option=>option.value===String(value))){const option=document.createElement('option');option.value=String(value);option.textContent=String(value);el.append(option);}el.value=value;}}batterySliderDirty=false;$('battery-reserve-slider').value=String(Math.round(cfg.battery_reserve_soc/5)*5);updateBatterySlider();updateMeterFields();updateExpertMode();updateEquipment();secretPlaceholders();}
+async function loadConfig(){const cfg=await api('/api/config');if(Number(cfg.mqtt_input_source)===1)cfg.mqtt_input_source=0;configBaseline=cfg;for(const [name,value] of Object.entries(cfg)){const el=$('config-form').elements.namedItem(name);if(!el)continue;if(el.type==='checkbox')el.checked=value;else if(el.hasAttribute('data-boolean'))el.value=String(!!value);else if(el.type==='number'){const scale=Number(el.dataset.scale)||1;el.value=Number((Number(value)/scale).toFixed(4));}else if(!el.hasAttribute('data-secret')){if(el.tagName==='SELECT'&&!Array.from(el.options).some(option=>option.value===String(value))){const option=document.createElement('option');option.value=String(value);option.textContent=String(value);el.append(option);}el.value=value;}}batterySliderDirty=false;$('battery-reserve-slider').value=String(Math.round(cfg.battery_reserve_soc/5)*5);updateBatterySlider();updateMeterFields();updateExpertMode();updateEquipment();secretPlaceholders();}
 function updateBatterySlider(){$('battery-reserve-view').textContent=`${format(Number($('battery-reserve-slider').value),0)} %`;}
 function powerFactor(phases=state?.charge_phases??3){const single=state?.single_power_per_amp_kw;return Number.isFinite(single)?single*phases:.23*phases;}
 function phaseForPower(kw){return state?.phase_switch_enabled?(kw>0&&kw<=3.5?1:3):(state?.fixed_charge_phases??3);}
 function powerSteps(){
-  const factor=powerFactor(3),minimum=(state?.min_charge_a??8)*factor,maximum=(state?.max_charge_a??16)*factor;
-  // 5.5 kW is the displayed 8 A operating floor (5.52 kW at 230 V).
+  const factor=powerFactor(3),minimum=(state?.min_charge_a??8.7)*factor,maximum=(state?.max_charge_a??16)*factor;
+  // Repeated vehicle tests established 6.0 kW as the stable three-phase floor.
   // Permit only display rounding, never lower the commissioned current floor.
-  const three=Array.from({length:12},(_,i)=>5.5+i*.5).filter(kw=>kw>=minimum-.05&&kw<=maximum+1e-6);
-  const one=(state?.phase_switch_enabled||state?.fixed_charge_phases===1)?Array.from({length:5},(_,i)=>1.5+i*.5).filter(kw=>kw>=(state?.min_charge_a??8)*powerFactor(1)-.05&&kw<=state.max_charge_a*powerFactor(1)+.05):[];
+  const three=Array.from({length:11},(_,i)=>6+i*.5).filter(kw=>kw>=minimum-.05&&kw<=maximum+1e-6);
+  const one=(state?.phase_switch_enabled||state?.fixed_charge_phases===1)?Array.from({length:5},(_,i)=>1.5+i*.5).filter(kw=>kw>=(state?.min_charge_a??8.7)*powerFactor(1)-.05&&kw<=state.max_charge_a*powerFactor(1)+.05):[];
   return [0,...one,...(state?.fixed_charge_phases===1?[]:three)];
 }
 function selectedPower(){return powerSteps()[Number($('current').value)]??0;}
 function powerStepForCurrent(amps){
   const phases=state?.phase_switch_enabled?state.manual_phases:(state?.fixed_charge_phases??3);
-  if(!Number.isFinite(amps)||amps<(state?.min_charge_a??8))return 0;
+  if(!Number.isFinite(amps)||amps<(state?.min_charge_a??8.7))return 0;
   const steps=powerSteps(),kw=amps*powerFactor(phases);let closest=0;
   for(let i=1;i<steps.length;i++)if(phaseForPower(steps[i])===phases&&(!closest||Math.abs(steps[i]-kw)<Math.abs(steps[closest]-kw)))closest=i;
   return closest;
@@ -622,7 +643,7 @@ document.addEventListener('visibilitychange',()=>{clearTimeout(pollTimer);if(!do
 
 window.addEventListener('resize',drawCharts);
 
-function showPage(){const anchor=location.hash.slice(1),groups=['setup-assistant','equipment-settings','huawei-settings','relay-settings','connection-settings','shell-settings','meter-settings','house-settings','hardware-settings','consumption-settings','mqtt-settings','vehicle-settings','diagnostic-settings','maintenance'];const page=anchor==='statistics'?'statistics':anchor==='settings'||groups.includes(anchor)?'settings':'overview';for(const id of ['overview','statistics','settings'])$(id).hidden=id!==page;document.querySelectorAll('nav a').forEach(a=>{const active=a.getAttribute('href')==='#'+page;a.classList.toggle('active',active);if(active)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});if(page==='statistics'&&initialized){loadHistory();loadSessions();}if(groups.includes(anchor)){for(let section=$(anchor);section;section=section.parentElement)if(section.tagName==='DETAILS')section.open=true;}requestAnimationFrame(()=>{drawCharts();if(groups.includes(anchor))$(anchor).scrollIntoView({block:'start'});else window.scrollTo(0,0);});}
+function showPage(){const anchor=location.hash.slice(1),groups=['setup-assistant','equipment-settings','opendtu-settings','huawei-settings','relay-settings','connection-settings','shell-settings','meter-settings','house-settings','hardware-settings','consumption-settings','mqtt-settings','vehicle-settings','diagnostic-settings','maintenance','appearance-settings'];const page=anchor==='statistics'?'statistics':anchor==='settings'||groups.includes(anchor)?'settings':'overview';for(const id of ['overview','statistics','settings'])$(id).hidden=id!==page;document.querySelectorAll('nav a').forEach(a=>{const active=a.getAttribute('href')==='#'+page;a.classList.toggle('active',active);if(active)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});if(page==='statistics'&&initialized){loadHistory();loadSessions();}if(groups.includes(anchor)){for(let section=$(anchor);section;section=section.parentElement)if(section.tagName==='DETAILS')section.open=true;}requestAnimationFrame(()=>{drawCharts();if(groups.includes(anchor))$(anchor).scrollIntoView({block:'start'});else window.scrollTo(0,0);});}
 
 const donateUrl=$('donate-link').href;
 let qrLoading=false;
@@ -638,6 +659,9 @@ function showDonate(){
 $('donate-open').addEventListener('click',showDonate);
 $('donate-close').addEventListener('click',()=>$('donate-dialog').close());
 $('donate-dialog').addEventListener('click',e=>{if(e.target===$('donate-dialog'))$('donate-dialog').close();});
+$('theme-light').addEventListener('click',()=>setTheme('light'));
+$('theme-dark').addEventListener('click',()=>setTheme('dark'));
+setTheme(document.documentElement.dataset.theme);
 
 window.addEventListener('hashchange',showPage);
 

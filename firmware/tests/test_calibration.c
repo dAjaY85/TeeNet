@@ -19,7 +19,7 @@ int main(void){
     settings_defaults(&s);s.enabled=true;s.mode=MODE_MANUAL;c=(current_calibration_t){0};
     for(int64_t t=1000;t<300000;t+=1000){float a=t%2000?12:12.6f;float noisy[]={a,a,a};current_calibration_step(&c,&s,true,12,noisy,t,t);}
     assert(c.adjustments==0);
-    float out[3];s.current_offset_a=2;float floor[]={8,8,8};control_report(&s,floor,8,0,false,out);
-    assert(fabsf(out[0]-s.grid_limit_a)<.001f);
-    puts("PASS: bounded calibration, stable window, stale samples, PV and stop isolation, minimum floor preserved");
+    float out[3];s.current_offset_a=2;float floor[]={8.7f,8.7f,8.7f};control_report(&s,floor,8.7f,0,false,out);
+    assert(fabsf(out[0]-(s.grid_limit_a+2))<.001f);
+    puts("PASS: bounded calibration, stable window, stale samples, PV and stop isolation, protocol floor preserved");
 }
