@@ -1,4 +1,5 @@
 #include "ems_core.h"
+#include "hardware_profile.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -10,8 +11,8 @@ void settings_defaults(settings_t *s) {
     s->version = EMS_SETTINGS_VERSION;
     s->huawei_unit_id=1;
     strcpy(s->mqtt_prefix, "wallbox-ems");
-    s->wallbox_tx_pin=17; s->wallbox_rx_pin=18; s->wallbox_rts_pin=-1;
-    s->xemex_tx_pin=4; s->xemex_rx_pin=5; s->xemex_rts_pin=-1;
+    s->wallbox_tx_pin=EMS_DEFAULT_SHELL_TX_PIN; s->wallbox_rx_pin=EMS_DEFAULT_SHELL_RX_PIN; s->wallbox_rts_pin=-1;
+    s->xemex_tx_pin=EMS_DEFAULT_METER_TX_PIN; s->xemex_rx_pin=EMS_DEFAULT_METER_RX_PIN; s->xemex_rts_pin=-1;
     s->wallbox_address=s->xemex_address=1;
     s->grid_limit_a=32; s->max_charge_a=16; s->min_charge_a=8.7f;
     s->manual_current_a=8.7f; s->nominal_v=230; s->power_factor=1; s->price_kwh=0.25f; s->solar_price_kwh=0.08f;
@@ -31,7 +32,7 @@ void settings_defaults(settings_t *s) {
     s->pv_house_priority_w=4000; s->pv_car_priority_w=6000;
     strcpy(s->opendtu_prefix,"opendtu");
 
-    s->external_mode_input_pin=6; s->evu_input_pin=7; s->evu_limit_a=0;
+    s->external_mode_input_pin=EMS_DEFAULT_MODE_INPUT_PIN; s->evu_input_pin=7; s->evu_limit_a=0;
     s->house_tx_pin=43; s->house_rx_pin=44; s->house_rts_pin=-1;
     s->house_address=1; s->house_meter_baud=9600; s->house_meter_format=0; s->house_xemex_coils=3;
     s->ads_sda_pin=8; s->ads_scl_pin=9; s->ads_wallbox_address=0x48; s->ads_house_address=0x49;
@@ -43,6 +44,7 @@ void settings_basic_mode(settings_t *s) {
     if(!s->battery_protect || !s->zero_feed_enabled)s->pv_allocation_enabled=false;
     if(!s->basic_mode)return;
     s->expert_mode=false; s->pv_allocation_enabled=false;
+    s->evcc_feature_enabled=false;
     s->zero_feed_enabled=s->battery_protect=s->vehicle_soc_enabled=s->pv_display_enabled=false;
     s->charge_plan_enabled=s->external_mode_input_enabled=s->evu_input_enabled=s->grid_guard_enabled=false;
     s->phase_switch_enabled=s->relay_board_enabled=false;
@@ -53,25 +55,53 @@ void settings_basic_mode(settings_t *s) {
     if(s->mode!=MODE_OFF && s->mode!=MODE_MANUAL){s->mode=MODE_OFF;s->enabled=false;}
 }
 void settings_fixed_pins(settings_t *s) {
-    if(s->xemex_tx_pin!=4 || s->xemex_rx_pin!=5 ||
-       s->house_tx_pin!=43 || s->house_rx_pin!=44 || s->external_mode_input_pin!=6 ||
-       s->evu_input_pin!=7 || s->relay1_pin!=12 || s->relay2_pin!=14) s->control_verified=false;
-    s->xemex_tx_pin=4;s->xemex_rx_pin=5;
-    s->house_tx_pin=43;s->house_rx_pin=44;s->external_mode_input_pin=6;s->evu_input_pin=7;
-    s->relay1_pin=12;s->relay2_pin=14;
+    if(s->xemex_tx_pin!=EMS_DEFAULT_METER_TX_PIN || s->xemex_rx_pin!=EMS_DEFAULT_METER_RX_PIN ||
+       s->house_tx_pin!=43 || s->house_rx_pin!=44 || s->external_mode_input_pin!=EMS_DEFAULT_MODE_INPUT_PIN ||
+       s->evu_input_pin!=7 || s->relay1_pin!=12) s->control_verified=false;
+    s->xemex_tx_pin=EMS_DEFAULT_METER_TX_PIN;s->xemex_rx_pin=EMS_DEFAULT_METER_RX_PIN;
+    s->house_tx_pin=43;s->house_rx_pin=44;s->external_mode_input_pin=EMS_DEFAULT_MODE_INPUT_PIN;s->evu_input_pin=7;
+    s->relay1_pin=12;s->relay2_pin=14; /* Legacy storage only; GPIO14 is unused. */
+    s->relay2_mode=0;s->nominal_v=230;
     s->wallbox_rts_pin=s->xemex_rts_pin=s->house_rts_pin=-1;
 }
 static bool pin_valid(int pin) { return pin==1 || pin==2 || (pin>=4 && pin<=18) || pin==21 || (pin>=38 && pin<=44) || pin==47; }
 bool settings_shell_pin_available(const settings_t *s,int pin,bool tx) {
-    bool wallbox_serial=strcmp(s->wallbox_meter_type,"shelly_gen2") && strcmp(s->wallbox_meter_type,"shelly_em1") && strcmp(s->wallbox_meter_type,"em24_tcp");
+    if(s->shell_rs485_interface==1)return true; /* UART pins are unused. */
+    bool wallbox_serial=s->meter_rs485_interface==0 && strcmp(s->wallbox_meter_type,"shelly_gen2") && strcmp(s->wallbox_meter_type,"shelly_em1") && strcmp(s->wallbox_meter_type,"em24_tcp");
     if(!pin_valid(pin) || pin==(tx?s->wallbox_rx_pin:s->wallbox_tx_pin) ||
        (wallbox_serial && (pin==s->xemex_tx_pin || pin==s->xemex_rx_pin))) return false;
-    bool serial=!strcmp(s->house_meter_type,"xemex") || sdm_profile(s->house_meter_type)!=NULL;
+    bool serial=s->house_rs485_interface==0 && (!strcmp(s->house_meter_type,"xemex") || sdm_profile(s->house_meter_type)!=NULL);
     return !(serial && (pin==s->house_tx_pin || pin==s->house_rx_pin)) &&
         !(s->external_mode_input_enabled && pin==s->external_mode_input_pin) &&
         !(s->evu_input_enabled && pin==s->evu_input_pin) &&
-        !(s->relay_board_enabled && (pin==s->relay1_pin || pin==s->relay2_pin)) &&
+        !(s->relay_board_enabled && pin==s->relay1_pin) &&
         !(s->phase_switch_enabled && s->phase_feedback_enabled && pin==13);
+}
+static bool rs485_endpoint_parts(const char *text,size_t capacity,uint32_t *address,unsigned *port) {
+    if(!text || !memchr(text,0,capacity) || !text[0])return false;
+    const char *p=text;uint32_t ip=0;
+    for(unsigned octet=0;octet<4;octet++){
+        unsigned value=0,digits=0;
+        while(*p>='0' && *p<='9'){value=value*10+(unsigned)(*p++-'0');if(++digits>3||value>255)return false;}
+        if(!digits)return false;
+        ip=(ip<<8)|value;
+        if(octet<3){if(*p++!='.')return false;}
+    }
+    unsigned selected=8899;
+    if(*p==':'){
+        p++;selected=0;if(!*p)return false;
+        while(*p>='0' && *p<='9'){selected=selected*10+(unsigned)(*p++-'0');if(selected>65535)return false;}
+        if(!selected)return false;
+    }
+    if(*p || !ip || ip==UINT32_MAX || (ip>>24)>=224)return false;
+    *address=ip;*port=selected;return true;
+}
+bool rs485_endpoint_valid(const char *text,size_t capacity) {
+    uint32_t address;unsigned port;return rs485_endpoint_parts(text,capacity,&address,&port);
+}
+static bool rs485_same_endpoint(const char *a,const char *b) {
+    uint32_t x,y;unsigned p,q;
+    return rs485_endpoint_parts(a,64,&x,&p) && rs485_endpoint_parts(b,64,&y,&q) && x==y && p==q;
 }
 static bool mqtt_topic_valid(const char *text,size_t size,bool required) {
     if(!memchr(text,0,size) || (required&&!text[0]))return false;
@@ -79,6 +109,20 @@ static bool mqtt_topic_valid(const char *text,size_t size,bool required) {
     return true;
 }
 bool settings_valid(const settings_t *s) {
+    if(s->shell_rs485_interface>1 || s->meter_rs485_interface>1 || s->house_rs485_interface>1 ||
+       !memchr(s->shell_rs485_host,0,sizeof(s->shell_rs485_host)) ||
+       !memchr(s->meter_rs485_host,0,sizeof(s->meter_rs485_host)) ||
+       !memchr(s->house_rs485_host,0,sizeof(s->house_rs485_host)) ||
+       !memchr(s->house_meter_type,0,sizeof(s->house_meter_type)) ||
+       !memchr(s->wallbox_meter_type,0,sizeof(s->wallbox_meter_type)))return false;
+    bool serial_meter=strcmp(s->wallbox_meter_type,"shelly_gen2") && strcmp(s->wallbox_meter_type,"shelly_em1") && strcmp(s->wallbox_meter_type,"em24_tcp");
+    bool serial_house=!strcmp(s->house_meter_type,"xemex") || sdm_profile(s->house_meter_type)!=NULL;
+    if((s->shell_rs485_interface && !rs485_endpoint_valid(s->shell_rs485_host,sizeof(s->shell_rs485_host))) ||
+       (serial_meter && s->meter_rs485_interface && !rs485_endpoint_valid(s->meter_rs485_host,sizeof(s->meter_rs485_host))) ||
+       (serial_house && s->house_rs485_interface && !rs485_endpoint_valid(s->house_rs485_host,sizeof(s->house_rs485_host))))return false;
+    if((s->shell_rs485_interface && serial_meter && s->meter_rs485_interface && rs485_same_endpoint(s->shell_rs485_host,s->meter_rs485_host)) ||
+       (s->shell_rs485_interface && serial_house && s->house_rs485_interface && rs485_same_endpoint(s->shell_rs485_host,s->house_rs485_host)) ||
+       (serial_meter && s->meter_rs485_interface && serial_house && s->house_rs485_interface && rs485_same_endpoint(s->meter_rs485_host,s->house_rs485_host)))return false;
     if(!mqtt_topic_valid(s->opendtu_prefix,sizeof(s->opendtu_prefix),s->mqtt_input_source==2) ||
        !mqtt_topic_valid(s->opendtu_pv_topic,sizeof(s->opendtu_pv_topic),s->mqtt_input_source==2&&s->pv_display_enabled) ||
        !mqtt_topic_valid(s->opendtu_pv_valid_topic,sizeof(s->opendtu_pv_valid_topic),false))return false;
@@ -89,18 +133,18 @@ bool settings_valid(const settings_t *s) {
        !memchr(s->house_meter_password,0,sizeof(s->house_meter_password)) ||
        !memchr(s->wallbox_meter_host,0,sizeof(s->wallbox_meter_host)) ||
        !memchr(s->wallbox_meter_password,0,sizeof(s->wallbox_meter_password))) return false;
-    bool house_serial=!strcmp(s->house_meter_type,"xemex") || sdm_profile(s->house_meter_type)!=NULL;
-    bool wallbox_serial=strcmp(s->wallbox_meter_type,"shelly_gen2") && strcmp(s->wallbox_meter_type,"shelly_em1") && strcmp(s->wallbox_meter_type,"em24_tcp");
+    bool house_serial=s->house_rs485_interface==0 && (!strcmp(s->house_meter_type,"xemex") || sdm_profile(s->house_meter_type)!=NULL);
+    bool wallbox_serial=s->meter_rs485_interface==0 && serial_meter;
     if(!strcmp(s->house_meter_type,"sdm230") || !strcmp(s->house_meter_type,"sdm120") ||
        (!strcmp(s->house_meter_type,"xemex") && s->house_xemex_coils!=3) || s->xemex_coils==2)return false;
     const int pins[]={s->wallbox_tx_pin,s->wallbox_rx_pin,s->wallbox_rts_pin,
         s->xemex_tx_pin,s->xemex_rx_pin,s->xemex_rts_pin,s->house_tx_pin,s->house_rx_pin,s->house_rts_pin,
         s->external_mode_input_pin,s->evu_input_pin,s->relay1_pin,s->relay2_pin,13};
-    const bool used[]={true,true,s->wallbox_rts_pin!=-1,
+    const bool used[]={s->shell_rs485_interface==0,s->shell_rs485_interface==0,s->shell_rs485_interface==0 && s->wallbox_rts_pin!=-1,
         wallbox_serial,wallbox_serial,wallbox_serial && s->xemex_rts_pin!=-1,
         house_serial,house_serial,house_serial && s->house_rts_pin!=-1,
         s->external_mode_input_enabled,s->evu_input_enabled,
-        s->relay_board_enabled,s->relay_board_enabled,s->phase_switch_enabled && s->phase_feedback_enabled};
+        s->relay_board_enabled,false,s->phase_switch_enabled && s->phase_feedback_enabled};
     for(unsigned i=0;i<sizeof(pins)/sizeof(pins[0]);i++) if(used[i]) {
         if(!pin_valid(pins[i])) return false;
         for(unsigned j=0;j<i;j++) if(used[j] && pins[i]==pins[j]) return false;
@@ -199,6 +243,7 @@ bool settings_decode(const void *blob,size_t length,settings_t *out) {
         case 23: prefix=offsetof(settings_t,control_status_visible); break;
         case 24: prefix=offsetof(settings_t,basic_mode); break;
         case 25: prefix=offsetof(settings_t,opendtu_prefix); break;
+        case 26: prefix=offsetof(settings_t,shell_rs485_interface); break;
         case EMS_SETTINGS_VERSION: prefix=sizeof(settings_t); break;
         default: return false;
     }
@@ -280,34 +325,50 @@ bool settings_apply_live(settings_t *runtime,const settings_t *before,const sett
 #define TEXT_SAME(field) if(strcmp(before->field,after->field)) return false
     TEXT_SAME(wifi_ssid); TEXT_SAME(wifi_password); TEXT_SAME(mqtt_uri);
     TEXT_SAME(mqtt_username); TEXT_SAME(mqtt_password); TEXT_SAME(mqtt_prefix);
-    TEXT_SAME(house_meter_type); TEXT_SAME(house_meter_host);
-    TEXT_SAME(wallbox_meter_type); TEXT_SAME(house_power_path);
-    TEXT_SAME(huawei_host); SAME(huawei_enabled); SAME(huawei_battery); SAME(huawei_pv); SAME(huawei_unit_id);
+    TEXT_SAME(house_meter_type);
+    TEXT_SAME(wallbox_meter_type);
     SAME(version); SAME(wallbox_tx_pin); SAME(wallbox_rx_pin); SAME(wallbox_rts_pin);
+    SAME(shell_rs485_interface); SAME(meter_rs485_interface); SAME(house_rs485_interface);
+    TEXT_SAME(shell_rs485_host); TEXT_SAME(meter_rs485_host); TEXT_SAME(house_rs485_host);
     SAME(xemex_tx_pin); SAME(xemex_rx_pin); SAME(xemex_rts_pin);
-    SAME(wallbox_address); SAME(xemex_address); SAME(grid_limit_a);
-    SAME(max_charge_a); SAME(min_charge_a); SAME(nominal_v); SAME(power_factor);
-    SAME(zero_feed_enabled); SAME(zero_reserve_w);
+    SAME(wallbox_address); SAME(xemex_address);
+    SAME(min_charge_a); SAME(nominal_v); SAME(power_factor);
     SAME(xemex_coils); SAME(meter_baud); SAME(meter_format); SAME(mqtt_state_json);
     SAME(current_offset_a);
-    SAME(phase_switch_enabled); SAME(phase_feedback_enabled); SAME(fixed_charge_phases); SAME(shell_limits_auto); TEXT_SAME(shell_setup_host);
+    SAME(phase_switch_enabled); SAME(phase_feedback_enabled); SAME(fixed_charge_phases);
     SAME(phase_feedback_closed_is_single);
     SAME(external_mode_input_enabled); SAME(evu_input_enabled);
-    SAME(external_mode_input_pin); SAME(evu_input_pin); SAME(evu_limit_a);
-    SAME(grid_guard_enabled); SAME(house_tx_pin); SAME(house_rx_pin); SAME(house_rts_pin);
+    SAME(external_mode_input_pin); SAME(evu_input_pin);
+    SAME(house_tx_pin); SAME(house_rx_pin); SAME(house_rts_pin);
     SAME(house_address); SAME(house_meter_baud); SAME(house_meter_format); SAME(house_xemex_coils);
     SAME(relay_board_enabled); SAME(relay_active_low); SAME(mqtt_enabled);
-    SAME(relay1_pin); SAME(relay2_pin); SAME(relay1_mode); SAME(relay2_mode);
+    SAME(relay1_pin); SAME(relay1_mode);
     if(before->mqtt_input_source==2||after->mqtt_input_source==2){
         SAME(mqtt_input_source);TEXT_SAME(opendtu_prefix);TEXT_SAME(opendtu_pv_topic);TEXT_SAME(opendtu_pv_valid_topic);
-        SAME(opendtu_current_positive_discharge);SAME(battery_protect);SAME(pv_display_enabled);
+        SAME(battery_protect);SAME(pv_display_enabled);
     }
 
 
 #undef SAME
 #undef TEXT_SAME
     if(!range(after->price_kwh,0,10)||!range(after->solar_price_kwh,0,10)) return false;
+    /* These readers and control limits are evaluated by existing background
+       tasks. They need no UART, GPIO or MQTT-client reconstruction. Preserve
+       automatically learned runtime limits when their saved fields did not
+       change (e.g. a price-only save). */
+#define LIVE(field) if(before->field!=after->field) runtime->field=after->field
+#define TEXT_LIVE(field) if(strcmp(before->field,after->field)) strcpy(runtime->field,after->field)
+    LIVE(grid_limit_a); LIVE(max_charge_a); LIVE(zero_feed_enabled); LIVE(zero_reserve_w);
+    TEXT_LIVE(house_meter_host); TEXT_LIVE(house_power_path);
+    LIVE(grid_guard_enabled); LIVE(evu_limit_a);
+    LIVE(shell_limits_auto); TEXT_LIVE(shell_setup_host);
+    LIVE(huawei_enabled); LIVE(huawei_battery); LIVE(huawei_pv); LIVE(huawei_unit_id); TEXT_LIVE(huawei_host);
+    LIVE(opendtu_current_positive_discharge);
+#undef LIVE
+#undef TEXT_LIVE
+    runtime->manual_current_a=fminf(runtime->manual_current_a,runtime->max_charge_a);
     runtime->price_kwh=after->price_kwh;
+    runtime->evcc_feature_enabled=after->evcc_feature_enabled;
     runtime->solar_price_kwh=after->solar_price_kwh;
     runtime->battery_protect=after->battery_protect;
     runtime->battery_reserve_soc=after->battery_reserve_soc;
@@ -317,7 +378,6 @@ bool settings_apply_live(settings_t *runtime,const settings_t *before,const sett
     runtime->pv_house_priority_w=after->pv_house_priority_w; runtime->pv_car_priority_w=after->pv_car_priority_w;
     runtime->expert_mode=after->expert_mode;
     runtime->basic_mode=after->basic_mode;
-    settings_basic_mode(runtime);
     runtime->control_status_visible=after->control_status_visible;
     runtime->vehicle_soc_enabled=after->vehicle_soc_enabled;
     runtime->pv_display_enabled=after->pv_display_enabled;
@@ -325,6 +385,7 @@ bool settings_apply_live(settings_t *runtime,const settings_t *before,const sett
     runtime->mqtt_input_source=after->mqtt_input_source;
     runtime->charge_plan_enabled=after->charge_plan_enabled;
     strcpy(runtime->wallbox_meter_host,after->wallbox_meter_host);
+    settings_basic_mode(runtime);
     return true;
 }
 int relay_output_level(bool active_low,bool energized) { return active_low?!energized:energized; }

@@ -10,9 +10,9 @@ const nodes={'config-form':{elements,addEventListener(n,f){callbacks[n]=f;}},mod
 let backend={battery_reserve_soc:35,price_grid_eur_kwh:.25,control_verified:true};
 let fail=false;
 const ctx=vm.createContext({Number,String,Object,Math,Error,
-  configBaseline:{...backend},batterySliderDirty:true,reserveQueued:true,busy:false,online:true,configSaving:false,
+  configBaseline:{...backend},batterySliderDirty:true,reserveQueued:true,busy:false,online:true,configSaving:false,settingsRebootPending:false,
   window:{teennetFeatures:{saved(){}}},$:id=>nodes[id],
-  writes(){},pollStatus:async()=>{},toast(){},secretPlaceholders(){},updateBatterySlider(){},updateMeterFields(){},updateExpertMode(){},updateEquipment(){},
+  updateSaveStatus(){return false;},updateUnsavedFunctions(){},writes(){},pollStatus:async()=>{},toast(){},secretPlaceholders(){},updateBatterySlider(){},updateMeterFields(){},updateExpertMode(){},updateEquipment(){},
   action(work){const p=work();pending.push(p);return p;},
   async api(path,data){assert.equal(path,'/api/config');if(data===undefined)return {...backend};if(fail)throw Error('offline');requests.push(data);Object.assign(backend,data);return {reboot_required:false};}
 });

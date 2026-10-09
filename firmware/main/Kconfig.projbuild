@@ -1,0 +1,10 @@
+choice TEE_HARDWARE_PROFILE
+    prompt "TeeNet hardware profile"
+    default TEE_BOARD_N16R8
+
+config TEE_BOARD_N16R8
+    bool "ESP32-S3 N16R8"
+
+config TEE_BOARD_ATOMS3_LITE
+    bool "Andreas Testboard (M5Stack AtomS3 Lite)"
+endchoice

@@ -23,7 +23,7 @@ int main(void) {
     assert(!settings_shell_pin_available(&s,4,true)&&!settings_shell_pin_available(&s,5,false));
     s.external_mode_input_enabled=true;assert(!settings_shell_pin_available(&s,6,true));
     s.evu_input_enabled=true;assert(!settings_shell_pin_available(&s,7,true));
-    s.relay_board_enabled=true;assert(!settings_shell_pin_available(&s,12,true)&&!settings_shell_pin_available(&s,14,false));
+    s.relay_board_enabled=true;assert(!settings_shell_pin_available(&s,12,true)&&settings_shell_pin_available(&s,14,false));
     s.phase_switch_enabled=true;s.relay1_mode=3;assert(!settings_shell_pin_available(&s,13,true));
     s.phase_feedback_enabled=false;assert(settings_shell_pin_available(&s,13,true));
     s.phase_feedback_enabled=true;
@@ -35,10 +35,10 @@ int main(void) {
     assert(out.wallbox_rts_pin==-1 && !out.relay_board_enabled && !out.ads1115_enabled);
     settings_defaults(&s);s.wallbox_rts_pin=10;s.xemex_rts_pin=11;
     s.relay_board_enabled=true;s.relay_active_low=true;assert(settings_valid(&s));
-    s.relay2_pin=11;assert(!settings_valid(&s));s.relay2_pin=14;
+    s.relay2_pin=11;assert(settings_valid(&s));s.relay2_pin=14;
     s.phase_switch_enabled=true;assert(!settings_valid(&s));s.relay1_mode=3;assert(settings_valid(&s));
     s.relay1_pin=13;assert(!settings_valid(&s));s.relay1_pin=12;
-    s.evu_input_enabled=true;s.evu_input_pin=14;assert(!settings_valid(&s));s.evu_input_pin=7;
+    s.evu_input_enabled=true;s.evu_input_pin=12;assert(!settings_valid(&s));s.evu_input_pin=7;
     s.mqtt_enabled=false;assert(!settings_valid(&s));s.vehicle_soc_enabled=s.pv_display_enabled=false;assert(settings_valid(&s));
     assert(relay_output_level(true,false)==1 && relay_output_level(true,true)==0);
     assert(relay_output_level(false,false)==0 && relay_output_level(false,true)==1);

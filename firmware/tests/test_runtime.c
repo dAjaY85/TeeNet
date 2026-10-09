@@ -25,9 +25,11 @@ int main(void) {
         assert(!memcmp(&runtime,&expected,sizeof(runtime)));
         assert(settings_apply_live(&runtime,&next,&next)); /* identical full form */
         next.grid_limit_a=25;
-        assert(!settings_apply_live(&runtime,&saved,&next));
-        assert(!memcmp(&runtime,&expected,sizeof(runtime))); /* failed apply is atomic */
+        assert(settings_apply_live(&runtime,&saved,&next));
+        expected.grid_limit_a=25;
+        assert(!memcmp(&runtime,&expected,sizeof(runtime)));
         next=saved; next.wifi_ssid[0]='X'; assert(!settings_apply_live(&runtime,&saved,&next));
+        assert(!memcmp(&runtime,&expected,sizeof(runtime))); /* failed apply is atomic */
         next=saved; next.current_offset_a=.5f; assert(!settings_apply_live(&runtime,&saved,&next));
     }
     /* Changing the discharge depth must not turn an active charge off. */

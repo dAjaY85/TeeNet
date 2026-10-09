@@ -18,7 +18,24 @@ Object.assign(reasons,{evu_stop:'EVU-Kontakt aktiv · Ladung gestoppt.',grid_fal
 
 Object.assign(reasons,{wallbox:'Keine aktuelle Wallbox-Abfrage · PV-Regelung gesperrt.',pv_waiting:'PV wartet auf ausreichend Überschuss.',pv_starting:'Überschuss wird vor dem Start geprüft.',pv_stopping:'PV-Schwankung überbrücken; bei weiterem Mangel stoppen.',pv_cooldown:'Pause vor erneutem PV-Start.'});
 
-let state=null,history={points:[],days:[]},token='',online=false,dirty=false,batterySliderDirty=false,initialized=false,busy=false,configSaving=false,source=0,toastTimer,uploading=false,powerQueued=false,reserveQueued=false,historyBusy=false,statusFailures=0;
+let state=null,history={points:[],days:[]},token='',online=false,dirty=false,batterySliderDirty=false,initialized=false,busy=false,configSaving=false,settingsRebootPending=false,settingsRebootDeferred=false,source=0,toastTimer,uploading=false,powerQueued=false,reserveQueued=false,historyBusy=false,statusFailures=0;
+
+// A stopped session has mode "off". Keep its next selection in this browser
+// without sending a control command or starting a charge.
+let preferredChargeMode=null;
+try{const saved=localStorage.getItem('teennet-charge-mode');if(['manual','pv'].includes(saved))preferredChargeMode=saved;}catch(error){}
+function rememberChargeMode(mode){
+  if(!['manual','pv'].includes(mode)||preferredChargeMode===mode)return;
+  preferredChargeMode=mode;
+  try{localStorage.setItem('teennet-charge-mode',mode);}catch(error){}
+}
+function displayedChargeMode(s){
+  if(s.basic_mode||s.zero_feed_enabled===false)return 'manual';
+  if(s.charge_plan_enabled&&s.charge_plan?.active)return 'pv';
+  if(s.external_mode_input_enabled)return s.external_mode_contact?'pv':'manual';
+  if(s.enabled&&['manual','pv'].includes(s.mode))return s.mode;
+  return preferredChargeMode||(['manual','pv'].includes(s.mode)?s.mode:'manual');
+}
 
 reasons.charge_ended='Mehrere Ladeabbrüche in kurzer Zeit. Bitte Ursache prüfen und erneut starten.';
 reasons.charge_retry='Ladeabbruch · neuer Versuch nach 30 Sekunden.';
@@ -40,6 +57,8 @@ reasons.manual_stop='Sollwert unter Mindeststrom · Stop angefordert.';
 reasons.phase_fault='Phasenumschaltung gestört · Ladung gesperrt. Schütz und Rückmeldung prüfen.';
 reasons.phase_switching='Phasenwechsel läuft · Ladung wird vor dem Schalten gestoppt.';
 reasons.phase_idle='Kein Ladestrom · Schütz aus. Bei Bedarf erneut starten.';
+reasons.evcc_fault='Shell meldet einen Fehler · evcc-Ladung pausiert.';
+reasons.evcc_timeout='evcc-Verbindung ausgefallen · Ladung gestoppt.';
 
 
 
@@ -48,7 +67,7 @@ function toast(text,error=false){$('toast').textContent=text;$('toast').classLis
 
 async function api(path,body,timeoutMs=8000,auth=false){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);try{const response=await fetch(path,{signal:controller.signal,cache:'no-store',...(auth?{headers:{'X-EMS-Token':token}}:{}),...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-EMS-Token':token},body:JSON.stringify(body)})});if(!response.ok)throw new Error((await response.text()).slice(0,240)||`HTTP ${response.status}`);return await response.json();}finally{clearTimeout(timer);}}
 
-function writes(){const batteryInactive=$('mode').value!=='pv';document.querySelectorAll('#config-form input, #config-form select, #show-wifi-password, #show-mqtt-password').forEach(el=>el.disabled=!online||!initialized||configSaving);document.querySelectorAll('[data-write]').forEach(b=>b.disabled=!online||busy||(!initialized&&!!b.closest('#config-form'))||((b.id==='battery-toggle'||b.id==='battery-start-toggle')&&(batteryInactive||!state?.battery_protect)));$('current').disabled=!online||busy;$('battery-reserve-slider').disabled=!online||busy||batteryInactive||!state?.battery_protect;for(const role of ['house','wallbox'])scanUi(role).button.disabled=!online||busy||!initialized||meterScanning||previewRunning||!!window.teennetFeatures?.networkBusy();window.teennetFeatures?.updateWrites();if($('config-form').elements.basic_mode?.value==='true')document.querySelectorAll('#house-settings input,#house-settings select,#battery-settings input,#hardware-settings input,#relay-settings select,#huawei-settings input').forEach(el=>el.disabled=true);}
+function writes(){const batteryInactive=$('mode').value!=='pv';document.querySelectorAll('#config-form input, #config-form select, #show-wifi-password, #show-mqtt-password').forEach(el=>el.disabled=!online||!initialized||configSaving);document.querySelectorAll('[data-write]').forEach(b=>b.disabled=!online||busy||(!initialized&&!!b.closest('#config-form'))||((b.id==='battery-toggle'||b.id==='battery-start-toggle')&&(batteryInactive||!state?.battery_protect)));$('current').disabled=!online||busy;$('battery-reserve-slider').disabled=!online||busy||batteryInactive||!state?.battery_protect;for(const role of ['house','wallbox'])scanUi(role).button.disabled=!online||busy||!initialized||meterScanning||previewRunning||!!window.teennetFeatures?.networkBusy();window.teennetFeatures?.updateWrites();if($('config-form').elements.basic_mode?.value==='true')document.querySelectorAll('#house-settings input,#house-settings select,#battery-settings input,#hardware-settings input,#relay-settings select,#huawei-settings input').forEach(el=>el.disabled=true);window.teenetEvccTest?.updateWrites(state);window.teenetTerms?.updateWrites();}
 
 function showConnection(ok){online=ok;writes();}
 
@@ -59,6 +78,11 @@ function controlStatus(s,valid=true){
   const result=(text,kind='normal')=>({text,kind,help:!valid?'#connection-settings':help[s.block_reason]||((s.phase_state==='fehler'||s.charge_stop_latched)?'#diagnostic-settings':null)});
   const wait=(text,seconds,maximum=false)=>text+(Number.isFinite(seconds)&&seconds>0?` · ${maximum?'höchstens noch':'noch'} ${Math.ceil(seconds)} s`:'');
   if(!valid)return result('Verbindung unterbrochen · Status nicht aktuell','fault');
+  if(s.evcc_test_enabled){
+    if(s.evcc_local_stop)return result('evcc · lokal gestoppt; Freigabe über den Ladeknopf','waiting');
+    if(s.evcc_lease_expired)return result('evcc · Verbindung ausgefallen; Stopp angefordert','fault');
+    if(!s.evcc_status_known)return result('evcc · Fahrzeugstatus unbekannt; Ladung pausiert','waiting');
+  }
   if(s.phase_state==='fehler')return result('Phasenumschaltung gestört · Ladung gesperrt','fault');
   const phaseWait={current_zero:'Phasenwechsel · warte auf Strom unter 1 A',zero_hold:'Phasenwechsel · stromlose Wartezeit',contact:'Phasenwechsel · warte auf Schütz-Rückmeldung',motion:'Phasenwechsel · Schütz schaltet',settle:'Phasenwechsel · Stabilisierung',fresh_data:'Phasenwechsel · warte auf frische Messwerte'};
   if(s.phase_switch_enabled&&s.phase_state!=='bereit')return result(wait(phaseWait[s.phase_wait_kind]||'Phasenwechsel läuft',s.phase_wait_s,['current_zero','contact','fresh_data'].includes(s.phase_wait_kind)),'waiting');
@@ -77,11 +101,13 @@ function controlStatus(s,valid=true){
   if(s.phase_wait_kind==='hold')text+=` · Phasenwechsel frühestens in ${s.phase_wait_s} s`;
   if(s.phase_wait_kind==='candidate')text+=' · '+wait('Phasenwechsel wird vorbereitet',s.phase_wait_s);
   if(s.block_reason==='grid_fallback')text+=' · Haus-Phasenwerte fehlen, maximal 8 kW';
+  if(s.evcc_test_enabled)text='evcc regelt · '+text;
   return result(text,charging?'normal':'waiting');
 }
 
 function chargeButtonLabel(s,online,charging){
   if(!online)return 'Verbindung fehlt';
+  if(s.evcc_test_enabled&&!s.enabled)return 'evcc steuert';
   if(s.charge_stop_latched||s.phase_state==='fehler')return 'Gesperrt · Entsperren';
   if(!s.enabled)return charging?'Stoppt …':'Gestoppt · Starten';
   if(s.phase_switch_enabled&&s.phase_state!=='bereit')return 'Phasenwechsel · Stoppen';
@@ -92,7 +118,7 @@ function chargeButtonLabel(s,online,charging){
 
 function render(){if(!state)return;const s=state,valid=online;
 
-  $('firmware-version').textContent=s.version?`TeeNet ${s.version}`:'—';
+  $('system-version').textContent=s.version?`V${s.version}`:'—';
 
 
 
@@ -100,7 +126,7 @@ function render(){if(!state)return;const s=state,valid=online;
 
   let message='';
 
-  if(!['none','off','manual_stop','below_minimum','pv_waiting','pv_starting','pv_cooldown','pv_stopping'].includes(s.block_reason))message=reasons[s.block_reason]||'Status unbekannt.';
+  if(!['none','off','manual_stop','below_minimum','pv_waiting','pv_starting','pv_cooldown','pv_stopping','evcc_waiting','evcc_local_stop','evcc_status'].includes(s.block_reason))message=reasons[s.block_reason]||'Status unbekannt.';
 
   if(s.reboot_required)message='Einstellungen gespeichert. Bitte neu starten.';
 
@@ -146,10 +172,10 @@ function render(){if(!state)return;const s=state,valid=online;
   $('time-note').textContent=s.clock_ok?'':'Uhrzeit wird synchronisiert …';$('time-note').hidden=s.clock_ok;
 
   $('current').max=powerSteps().length-1;
-  if(!dirty){const mode=s.charge_plan_enabled&&s.charge_plan?.active?'pv':s.mode;if(['manual','pv'].includes(mode))$('mode').value=mode;$('current').value=powerStepForCurrent(s.current_a);}
+  if(!dirty){const mode=displayedChargeMode(s);$('mode').value=mode;if(s.enabled&&!s.evcc_test_enabled)rememberChargeMode(mode);$('current').value=powerStepForCurrent(s.current_a);}
 
   document.querySelector('.mode-picker').hidden=!!s.basic_mode;
-  if(s.basic_mode)$('mode').value='manual';
+  if(s.basic_mode||s.zero_feed_enabled===false)$('mode').value='manual';
   $('pv-allocation-status').hidden=!s.pv_allocation_enabled||$('mode').value!=='pv';
   $('pv-allocation-status').textContent=s.pv_allocation_ready?`PV-Priorität: ${['Hausakku zuerst','Auto zuerst','Anteilig aufteilen'][s.pv_priority]}`:'PV-Priorität pausiert · Akkuleistungswerte fehlen';
   document.querySelectorAll('[data-mode]').forEach(el=>el.setAttribute('aria-pressed',String(el.dataset.mode===$('mode').value)));
@@ -184,8 +210,6 @@ function render(){if(!state)return;const s=state,valid=online;
   $('apply-control').setAttribute('aria-pressed',String(!!s.enabled));
   $('charge-target').textContent=format(valid?s.target_current_a*powerFactor():null,1);
 
-  const maxPower=s.max_charge_a*powerFactor();
-  $('charge-power-bar').style.width=`${valid&&!idle&&Number.isFinite(watts)?Math.min(100,watts/1000/maxPower*100):0}%`;
   $('session-prices').textContent=`Netz ${format((s.grid_price_kwh??.25)*100,0)} ct · Solar / Akku ${format((s.solar_price_kwh??.08)*100,0)} ct je kWh`;
 
   const lastHouse=TeeNetHealth.reading(s,'house',valid),house=valid&&s.house_meter_ok&&Number.isFinite(s.house_power_w)?s.house_power_w:lastHouse.value, direction=house==null?'unknown':house>50?'import':house< -50?'export':'balanced';
@@ -205,14 +229,15 @@ function render(){if(!state)return;const s=state,valid=online;
 
   const mqttSource=s.mqtt_input_source==='opendtu'?'OpenDTU':'Smart Home';
   const signal=Number.isFinite(s.wifi_rssi_dbm)?` · ${s.wifi_rssi_dbm} dBm`:'';
-  const diagnostics=[diagnostic('Heimnetz',s.wifi_ok?`${s.station_ip}${signal}`:'Nicht verbunden'),diagnostic('Uhrzeit',s.clock_ok?'Synchronisiert':'Warte auf Internetzeit'),diagnostic('MQTT',s.mqtt_ok?`Verbunden · ${mqttSource}`:`Nicht verbunden · ${mqttSource}`),diagnostic('Wallbox',s.wallbox_ok?'Kommunikation OK':'Keine aktuellen Abfragen'),diagnostic('Wallbox-Zähler',s.feedback_ok?'Daten aktuell':'Daten fehlen'),diagnostic('Hauszähler',s.house_meter_ok?'Daten aktuell':s.zero_feed_enabled||s.grid_guard_enabled?'Daten fehlen':'Nicht benötigt'),diagnostic('Speicherung',s.storage_ok?'Bereit':'Fehler'),...(s.huawei_enabled?[diagnostic('Huawei',s.huawei_ok?s.huawei_model:'Keine aktuellen Daten')]:[])];
+  const diagnostics=[diagnostic('Hardware',s.hardware||'ESP32-S3'),diagnostic('Heimnetz',s.wifi_ok?`${s.station_ip}${signal}`:'Nicht verbunden'),diagnostic('Uhrzeit',s.clock_ok?'Synchronisiert':'Warte auf Internetzeit'),diagnostic('MQTT',s.mqtt_ok?`Verbunden · ${mqttSource}`:`Nicht verbunden · ${mqttSource}`),diagnostic('Wallbox',s.wallbox_ok?'Kommunikation OK':'Keine aktuellen Abfragen'),diagnostic('Wallbox-Zähler',s.feedback_ok?'Daten aktuell':'Daten fehlen'),diagnostic('Hauszähler',s.house_meter_ok?'Daten aktuell':s.zero_feed_enabled||s.grid_guard_enabled?'Daten fehlen':'Nicht benötigt'),diagnostic('Speicherung',s.storage_ok?'Bereit':'Fehler'),...(s.huawei_enabled?[diagnostic('Huawei',s.huawei_ok?s.huawei_model:'Keine aktuellen Daten')]:[])];
   if(s.external_mode_input_enabled)diagnostics.push(diagnostic('Betriebsart-Kontakt',s.external_mode_contact?'PV-Überschuss':'Manuell'));
-  if(s.evu_input_enabled)diagnostics.push(diagnostic('EVU-Kontakt',s.evu_active?'Aktiv':'Frei'));
+  if(s.evu_input_enabled)diagnostics.push(diagnostic('Extern Start / Stopp / EVU-Kontakt',s.evu_active?'Aktiv':'Frei'));
   if(s.huawei_enabled&&s.house_meter_type==='huawei')diagnostics.push(diagnostic('Hausströme',s.house_current_ok&&Array.isArray(s.house_a)?s.house_a.map((a,i)=>`L${i+1} ${format(a,2)} A`).join(' · '):'Keine gültige dreiphasige Messung'));
   if(s.grid_guard_enabled)diagnostics.push(diagnostic('Hausanschlussschutz',s.grid_guard_ok?'Messung OK':'Phasenwerte fehlen · maximal 8 kW'));
   $('diagnostics').replaceChildren(...diagnostics);
 
   window.teennetFeatures?.render();
+  if(typeof window!=='undefined' && window.dispatchEvent && typeof CustomEvent==='function')window.dispatchEvent(new CustomEvent('teenet-status',{detail:s}));
 
 }
 
@@ -288,11 +313,15 @@ $('session-csv').href=`/api/export.csv?${sessionQuery()}`;
 
 function shellPinChoices(values,field){
   const occupied=new Map();
-  if(!['shelly_gen2','shelly_em1','em24_tcp'].includes(values.wallbox_meter_type)){occupied.set(4,'Wallbox-Zähler TX');occupied.set(5,'Wallbox-Zähler RX');}
-  if(['xemex','sdm630','sdm630mct'].includes(values.house_meter_type)){occupied.set(43,'Hauszähler TX');occupied.set(44,'Hauszähler RX');}
-  if(values.external_mode_input_enabled)occupied.set(6,'Betriebsart-Kontakt');
-  if(values.evu_input_enabled)occupied.set(7,'EVU-Kontakt');
-  if(values.relay_board_enabled){occupied.set(12,'Relais 1');occupied.set(14,'Relais 2');}
+  const activeState=typeof state==='undefined'?null:state;
+  if(Number(values.meter_rs485_interface||0)===0&&!['shelly_gen2','shelly_em1','em24_tcp'].includes(values.wallbox_meter_type)){
+    occupied.set(Number(activeState?.default_meter_tx_pin||4),'Wallbox-Zähler TX');
+    occupied.set(Number(activeState?.default_meter_rx_pin||5),'Wallbox-Zähler RX');
+  }
+  if(Number(values.house_rs485_interface||0)===0&&['xemex','sdm630','sdm630mct'].includes(values.house_meter_type)){occupied.set(43,'Hauszähler TX');occupied.set(44,'Hauszähler RX');}
+  if(values.external_mode_input_enabled)occupied.set(Number(activeState?.external_mode_input_pin||6),'Betriebsart-Kontakt');
+  if(values.evu_input_enabled)occupied.set(7,'Extern Start / Stopp / EVU-Kontakt');
+  if(values.relay_board_enabled){occupied.set(12,'Relais 1');}
   if(values.phase_switch_enabled&&values.phase_feedback_enabled!==false)occupied.set(13,'Schütz-Rückmeldung');
   const other=field==='wallbox_tx_pin'?'wallbox_rx_pin':'wallbox_tx_pin';
   occupied.set(Number(values[other]),field==='wallbox_tx_pin'?'Shell RX':'Shell TX');
@@ -301,20 +330,24 @@ function shellPinChoices(values,field){
 function updateShellPins(){
   const f=$('config-form').elements,values={house_meter_type:f.house_meter_type.value,wallbox_meter_type:f.wallbox_meter_type.value};
   for(const key of ['external_mode_input_enabled','evu_input_enabled','relay_board_enabled','phase_switch_enabled','phase_feedback_enabled'])values[key]=f[key].checked;
-  values.wallbox_tx_pin=Number(f.wallbox_tx_pin.value||17);values.wallbox_rx_pin=Number(f.wallbox_rx_pin.value||18);
+  values.meter_rs485_interface=f.meter_rs485_interface.value;values.house_rs485_interface=f.house_rs485_interface.value;
+  const defaultTx=Number(state?.default_shell_tx_pin||17),defaultRx=Number(state?.default_shell_rx_pin||18);
+  values.wallbox_tx_pin=Number(f.wallbox_tx_pin.value||defaultTx);values.wallbox_rx_pin=Number(f.wallbox_rx_pin.value||defaultRx);
   let conflict=false;
-  for(const [name,standard] of [['wallbox_tx_pin',17],['wallbox_rx_pin',18]]){
+  for(const [name,standard] of [['wallbox_tx_pin',defaultTx],['wallbox_rx_pin',defaultRx]]){
     const select=f[name],selected=values[name],choices=shellPinChoices(values,name),chosen=choices.find(c=>c.pin===selected);
     if(!chosen)choices.push({pin:selected,reason:'Nicht geeignet'});
     select.replaceChildren(...choices.map(({pin,reason})=>{const option=document.createElement('option');option.value=String(pin);option.textContent=`GPIO ${pin}${reason?' · belegt: '+reason:pin===standard?' · Standard':''}`;option.disabled=!!reason;return option;}));
-    select.value=String(selected);const invalid=!chosen||!!chosen.reason;conflict||=invalid;
+    select.value=String(selected);const invalid=Number(f.shell_rs485_interface.value)===0&&(!chosen||!!chosen.reason);conflict||=invalid;
     select.setCustomValidity(invalid?'Dieser Shell-Pin ist belegt. Bitte einen freien Pin wählen.':'');select.setAttribute('aria-invalid',String(invalid));select.classList.toggle('modified-setting',selected!==standard);
   }
   $('shell-pin-warning').hidden=!conflict;$('shell-pin-warning').textContent=conflict?'Pin bereits belegt. Freien Pin wählen.':'';
+  $('shell-pin-default-note').textContent=`Standard für ${state?.hardware||'dieses Board'}: TX ${defaultTx} / RX ${defaultRx}. Nur freie Pins wählen; danach neu starten.`;
+  $('mode-contact-note').textContent=`GPIO${Number(state?.external_mode_input_pin||6)}: offen = Manuell · gegen GND = PV-Überschuss.`;
 }
-$('shell-pins-default').addEventListener('click',()=>{const f=$('config-form').elements;f.wallbox_tx_pin.value='17';f.wallbox_rx_pin.value='18';updateShellPins();toast('TX 17 / RX 18 ausgewählt. Zum Übernehmen speichern.');});
+$('shell-pins-default').addEventListener('click',()=>{const f=$('config-form').elements,tx=Number(state?.default_shell_tx_pin||17),rx=Number(state?.default_shell_rx_pin||18);f.wallbox_tx_pin.value=String(tx);f.wallbox_rx_pin.value=String(rx);updateShellPins();toast(`TX ${tx} / RX ${rx} ausgewählt. Zum Übernehmen speichern.`);});
 
-const additionalFeatureFields=['pv_allocation_enabled','zero_feed_enabled','charge_plan_enabled','battery_protect','vehicle_soc_enabled','pv_display_enabled','relay_board_enabled','external_mode_input_enabled','evu_input_enabled','grid_guard_enabled','phase_switch_enabled','huawei_enabled','huawei_battery','huawei_pv'];
+const additionalFeatureFields=['evcc_feature_enabled','pv_allocation_enabled','zero_feed_enabled','charge_plan_enabled','battery_protect','vehicle_soc_enabled','pv_display_enabled','relay_board_enabled','external_mode_input_enabled','evu_input_enabled','grid_guard_enabled','phase_switch_enabled','huawei_enabled','huawei_battery','huawei_pv'];
 function normalizeBasicFields(){
  const f=$('config-form').elements;if(f.basic_mode.value!=='true')return;
  for(const name of additionalFeatureFields)f[name].checked=false;
@@ -338,6 +371,16 @@ document.querySelectorAll('[data-function-mode]').forEach(button=>button.addEven
 
 function updateEquipment(){const f=$('config-form').elements,checked=name=>f[name].checked,basic=f.basic_mode.value==='true',expert=!basic;
  updateFunctionMode();
+ $('evcc-settings').hidden=basic||!checked('evcc_feature_enabled');
+ const meterSerial=!['shelly_gen2','shelly_em1','em24_tcp'].includes(f.wallbox_meter_type.value),houseSerial=['xemex','sdm630','sdm630mct'].includes(f.house_meter_type.value);
+ for(const role of ['shell','meter','house']){
+   const tcp=Number(f[role+'_rs485_interface'].value)===1;
+   $(role+'-gateway-field').hidden=!tcp;$(role+'-gateway-note').hidden=!tcp;
+   f[role+'_rs485_host'].required=tcp&&(role==='shell'||(role==='meter'?meterSerial:houseSerial));
+ }
+ $('meter-transport-settings').hidden=!meterSerial;$('house-transport-settings').hidden=!houseSerial;
+ $('shell-uart-pins').hidden=Number(f.shell_rs485_interface.value)===1;
+
  $('shell-address').hidden=!checked('shell_limits_auto');$('shell-manual-limits').hidden=checked('shell_limits_auto')&&!!state?.shell_limits_ok;
  $('relay-settings').hidden=basic||!checked('relay_board_enabled');
  $('hardware-settings').hidden=basic||(!checked('external_mode_input_enabled')&&!checked('evu_input_enabled'));
@@ -346,7 +389,7 @@ function updateEquipment(){const f=$('config-form').elements,checked=name=>f[nam
  $('battery-settings').hidden=basic||!checked('battery_protect');$('phase-settings').hidden=!checked('phase_switch_enabled');$('fixed-phase-setting').hidden=checked('phase_switch_enabled');if(checked('phase_switch_enabled'))f.fixed_charge_phases.value='3';
  f.phase_switch_enabled.closest('label').hidden=!checked('relay_board_enabled');
 
- $('house-settings').hidden=basic||!(checked('zero_feed_enabled')||checked('grid_guard_enabled'));$('maintenance').hidden=false;$('diagnostic-settings').hidden=!expert;
+ $('house-settings').hidden=basic||!(checked('zero_feed_enabled')||checked('grid_guard_enabled'));$('maintenance').hidden=false;$('diagnostic-settings').hidden=false;
 
  $('huawei-settings').hidden=basic||!checked('huawei_enabled');
  const opendtu=Number(f.mqtt_input_source.value)===2;
@@ -378,10 +421,38 @@ function updateEquipment(){const f=$('config-form').elements,checked=name=>f[nam
  $('pv-house-priority-label').textContent=priority===2?'Anteil Hausakku (kW)':'Für Hausakku reservieren (kW)';
  $('pv-car-priority-label').textContent=priority===2?'Anteil Auto (kW)':'Auto vorrangig bis (kW)';
  $('pv-allocation-note').textContent=priority===0?'Leistung für den Hausakku reservieren; den Rest lädt das Auto. Ab 99 % entfällt die Reserve.':priority===1?'Auto bis zur gewählten Leistung laden; den Rest erhält der Hausakku.':'Verhältnis festlegen: 2 kW Hausakku und 6 kW Auto ergeben 25 % / 75 %.';
- updateModbus();updateHouseQuery();updateWallboxQuery();updateShellPins();
+ updateModbus();updateHouseQuery();updateWallboxQuery();updateShellPins();updateUnsavedFunctions();
 
 }
 
+function updateUnsavedFunctions(){
+ const f=$('config-form').elements;
+ const changed=Array.from(f).some(el=>{
+  if(!el.name||el.type==='submit'||!(el.name in configBaseline))return false;
+  if(el.hasAttribute('data-secret'))return !!el.value;
+  const value=el.type==='checkbox'?el.checked:el.hasAttribute('data-boolean')?el.value==='true':el.type==='number'||el.hasAttribute('data-number')?Number(el.value)*(Number(el.dataset.scale)||1):el.value;
+  const baseline=configBaseline[el.name];
+  return typeof value==='number'&&typeof baseline==='number'?Math.abs(value-baseline)>.0001:value!==baseline;
+ })||Array.from(f).some(el=>el.hasAttribute('data-secret')&&!!el.value)||$('clear-wifi-password').checked||$('opendtu-enabled').checked!==(Number(configBaseline.mqtt_input_source)===2);
+  $('functions-unsaved').hidden=!initialized||(!changed&&(!settingsRebootPending||settingsRebootDeferred));
+ $('settings-notice-title').textContent=changed?'Ungespeicherte Änderungen':'Neustart erforderlich';
+ $('settings-notice-icon').textContent=changed?'✎':'↻';
+ $('functions-unsaved').dataset.kind=changed?'unsaved':'restart';
+ $('settings-notice-text').textContent=changed?'Bitte Einstellungen speichern.':'Gespeicherte Systemänderungen werden nach dem Neustart aktiv.';
+ $('settings-notice-save').hidden=!changed;
+ $('settings-notice-restart-actions').hidden=changed||!settingsRebootPending;
+
+}
+function updateSaveStatus(result){
+ const wasPending=settingsRebootPending;
+ const newlyRequired=typeof result.restart_needed==='boolean'?result.restart_needed:
+   typeof result.applied==='boolean'?!result.applied:!!result.reboot_required&&!wasPending;
+ settingsRebootPending=!!result.reboot_required;
+ // A live save must not reopen a restart the user has already postponed.
+ if(!settingsRebootPending||newlyRequired)settingsRebootDeferred=false;
+ return newlyRequired;
+}
+$('config-form').addEventListener('input',updateUnsavedFunctions);
 $('config-form').addEventListener('change',e=>{
  const f=$('config-form').elements,name=e.target.name;
  if(e.target.id==='opendtu-enabled'){f.mqtt_input_source.value=e.target.checked?'2':'0';if(e.target.checked)f.mqtt_enabled.checked=true;}
@@ -505,31 +576,34 @@ $('ap-mode').addEventListener('click',()=>{if(!window.confirm('Heimnetz trennen 
 $('battery-toggle').addEventListener('click',()=>action(async()=>{if(!state.battery_protect){toast('Akku-Daten zuerst unter Einstellungen aktivieren.',true);return;}await api('/api/control',{battery_use:!state.battery_use});await pollStatus();}));
 $('battery-start-toggle').addEventListener('click',()=>action(async()=>{if(!state.battery_protect){toast('Akku-Daten zuerst unter Einstellungen aktivieren.',true);return;}await api('/api/control',{battery_start_use:!state.battery_start_use});await pollStatus();}));
 $('battery-reserve-slider').addEventListener('input',()=>{batterySliderDirty=true;updateBatterySlider();});
-function applyReserveOnRelease(){if($('mode').value!=='pv'){reserveQueued=false;return;}if(!reserveQueued||busy||!online)return;action(async()=>{reserveQueued=false;const reserve=Number($('battery-reserve-slider').value);const result=await api('/api/config',{battery_reserve_soc:reserve});if(result.reboot_required)throw new Error('Gespeichert. Bitte neu starten, damit die Grenze gilt.');const field=$('config-form').elements.battery_reserve_soc;if(Number(field.value)===configBaseline.battery_reserve_soc)field.value=String(reserve);configBaseline.battery_reserve_soc=reserve;batterySliderDirty=false;await pollStatus();toast(`Entladegrenze ${reserve} % gespeichert.`);});}
+function applyReserveOnRelease(){if($('mode').value!=='pv'){reserveQueued=false;return;}if(!reserveQueued||busy||!online)return;action(async()=>{reserveQueued=false;const reserve=Number($('battery-reserve-slider').value);const result=await api('/api/config',{battery_reserve_soc:reserve});if(updateSaveStatus(result))throw new Error('Gespeichert. Bitte neu starten, damit die Grenze gilt.');const field=$('config-form').elements.battery_reserve_soc;if(Number(field.value)===configBaseline.battery_reserve_soc)field.value=String(reserve);configBaseline.battery_reserve_soc=reserve;batterySliderDirty=false;await pollStatus();toast(`Entladegrenze ${reserve} % gespeichert.`);});}
 $('battery-reserve-slider').addEventListener('change',()=>{reserveQueued=true;applyReserveOnRelease();});
 $('control-form').addEventListener('input',()=>{dirty=true;updateDesiredPower();});
 $('current').addEventListener('change',()=>{powerQueued=true;applyPowerOnRelease();});
-function applyPowerOnRelease(){if(!powerQueued||busy||!online||$('mode').value!=='manual')return;action(async()=>{do{powerQueued=false;const current=selectedCurrent(),enabled=selectedPower()>0;await api('/api/control',{mode:'manual',current_a:current,manual_phases:phaseForPower(selectedPower()),enabled});}while(powerQueued&&online&&$('mode').value==='manual');dirty=false;await pollStatus();toast('Ladeleistung übernommen.');});}
+function applyPowerOnRelease(){if(!powerQueued||busy||!online||$('mode').value!=='manual')return;action(async()=>{do{powerQueued=false;const current=selectedCurrent(),enabled=selectedPower()>0;await api('/api/control',{mode:'manual',current_a:current,manual_phases:phaseForPower(selectedPower()),enabled});rememberChargeMode('manual');}while(powerQueued&&online&&$('mode').value==='manual');dirty=false;await pollStatus();toast('Ladeleistung übernommen.');});}
 
 document.querySelectorAll('[data-mode]').forEach(el=>el.addEventListener('click',()=>{
   if(busy||!online)return;
+  if(el.dataset.mode==='pv'&&(state?.basic_mode||state?.zero_feed_enabled===false))return;
   const mode=el.dataset.mode;$('mode').value=mode;if(mode!=='manual')powerQueued=false;
   dirty=true;render();
   // A running session changes policy immediately; only actual phase changes
   // and missing operating prerequisites require a stop in the controller.
-  if(state?.enabled&&state.mode!==mode)action(async()=>{try{await api('/api/control',{mode});dirty=false;await pollStatus();toast('Betriebsart übernommen.');}catch(error){dirty=false;render();throw error;}});
+  if(state?.enabled&&state.mode!==mode)action(async()=>{try{await api('/api/control',{mode});rememberChargeMode(mode);dirty=false;await pollStatus();toast('Betriebsart übernommen.');}catch(error){dirty=false;render();throw error;}});
+  else{rememberChargeMode(mode);dirty=false;render();}
 }));
 
 $('control-form').addEventListener('submit',e=>{e.preventDefault();action(async()=>{
   if(state.charge_stop_latched||state.phase_state==='fehler'){
     if(state.can_unlock===false){toast('Zuerst Störung beheben.',true);return;}
     await api('/api/control',{enabled:false,restart:true});toast('Sperre aufgehoben. Zum Laden erneut starten.');
-  }else if(state.enabled){await api('/api/control',{enabled:false,mode:'off'});toast('Stop-Anforderung gesendet.');}
+  }else if(state.enabled){rememberChargeMode($('mode').value);await api('/api/control',{enabled:false,mode:'off'});toast('Stop-Anforderung gesendet.');}
   else {
     const actual=state.actual_a||[];
     if(state.feedback_ok&&actual.some(a=>Number.isFinite(a)&&a>=1)){toast('Stopp wird noch ausgeführt.');return;}
     const mode=$('mode').value,enabled=mode!=='manual'||selectedPower()>0;
     await api('/api/control',{mode,current_a:selectedCurrent(),manual_phases:phaseForPower(selectedPower()),enabled,restart:enabled});
+    rememberChargeMode(mode);
     toast(enabled?'Start angefordert.':'Zuerst eine Ladeleistung auswählen.');
   }
   dirty=false;await pollStatus();
@@ -537,11 +611,14 @@ $('control-form').addEventListener('submit',e=>{e.preventDefault();action(async(
 $('unlock-control').addEventListener('click',()=>action(async()=>{await api('/api/control',{enabled:false,restart:true});await pollStatus();toast('Sperre aufgehoben. Mit Start laden.');}));
 
 
-$('config-form').addEventListener('submit',e=>{e.preventDefault();action(async()=>{const data={};for(const el of $('config-form').elements){if(!el.name||el.type==='submit'||el.disabled)continue;if(el.hasAttribute('data-secret')&&!el.value)continue;const scale=Number(el.dataset.scale)||1;const value=el.type==='number'||el.hasAttribute('data-number')?Number(el.value)*scale:el.type==='checkbox'?el.checked:el.hasAttribute('data-boolean')?el.value==='true':el.value;const baseline=typeof configBaseline[el.name]==='number'?Number(configBaseline[el.name].toFixed(4)):configBaseline[el.name];if(value!==baseline)data[el.name]=value;}if($('clear-wifi-password').checked)data.wifi_password='';configSaving=true;writes();try{const result=await api('/api/config',data);Object.assign(configBaseline,data);for(const name of ['wifi_password','mqtt_password'])if(name in data){configBaseline[name+'_set']=!!data[name];delete configBaseline[name];}secretPlaceholders();await loadConfig();window.teennetFeatures?.saved(result);$('clear-wifi-password').checked=false;$('config-note').textContent=result.reboot_required?'Gespeichert. Für diese Änderungen ist ein Neustart erforderlich.':'Gespeichert und übernommen.';$('config-note').hidden=false;for(const el of $('config-form').elements)if(el.hasAttribute('data-secret'))el.value='';toast(result.reboot_required?'Gespeichert. Bitte neu starten.':'Einstellungen übernommen.');await pollStatus();}finally{configSaving=false;writes();}});});
+$('config-form').addEventListener('submit',e=>{e.preventDefault();action(async()=>{const data={};for(const el of $('config-form').elements){if(!el.name||el.type==='submit'||el.disabled)continue;if(el.hasAttribute('data-secret')&&!el.value)continue;const scale=Number(el.dataset.scale)||1;const value=el.type==='number'||el.hasAttribute('data-number')?Number(el.value)*scale:el.type==='checkbox'?el.checked:el.hasAttribute('data-boolean')?el.value==='true':el.value;const baseline=typeof configBaseline[el.name]==='number'?Number(configBaseline[el.name].toFixed(4)):configBaseline[el.name];if(value!==baseline)data[el.name]=value;}if($('clear-wifi-password').checked)data.wifi_password='';configSaving=true;writes();try{const result=await api('/api/config',data);Object.assign(configBaseline,data);for(const name of ['wifi_password','mqtt_password'])if(name in data){configBaseline[name+'_set']=!!data[name];delete configBaseline[name];}secretPlaceholders();await loadConfig();$('clear-wifi-password').checked=false;$('config-note').hidden=true;for(const el of $('config-form').elements)if(el.hasAttribute('data-secret'))el.value='';const restartNeeded=updateSaveStatus(result);updateUnsavedFunctions();if(!restartNeeded)toast(settingsRebootPending?'Änderungen übernommen. Ein früherer Neustart steht noch aus.':'Einstellungen übernommen.');await pollStatus();}finally{configSaving=false;writes();}});});
 
 
 
-$('reboot').addEventListener('click',()=>action(async()=>{await api('/api/reboot',{});toast('Zählerstand wird gesichert. Controller startet neu.');initialized=false;dirty=false;showConnection(false);}));
+function restartController(){action(async()=>{await api('/api/reboot',{});toast('Zählerstand wird gesichert. Controller startet neu.');initialized=false;dirty=false;settingsRebootPending=false;updateUnsavedFunctions();showConnection(false);});}
+$('reboot').addEventListener('click',restartController);
+$('settings-notice-reboot').addEventListener('click',restartController);
+$('settings-notice-later').addEventListener('click',()=>{settingsRebootDeferred=true;updateUnsavedFunctions();});
 
 $('factory-reset').addEventListener('click',()=>{if(!window.confirm('Alle WLAN-, MQTT-, Einstellungs- und Statistikdaten löschen?'))return;action(async()=>{await api('/api/factory-reset',{});toast('Werksreset wird ausgeführt.');initialized=false;dirty=false;showConnection(false);});});
 
@@ -549,6 +626,7 @@ $('reset-total').addEventListener('click',()=>{if(!window.confirm('Gesamtzähler
 $('reset-sessions').addEventListener('click',()=>{if(!window.confirm('Alle gespeicherten Ladesitzungen und den CSV-Inhalt löschen?'))return;action(async()=>{await api('/api/sessions/reset',{});sessionOffset=0;await loadSessions();toast('Ladesitzungen gelöscht.');});});
 
 let selectedFirmware=null;
+$('ota-file-open').addEventListener('click',()=>{$('firmware-update').open=true;$('local-firmware-update').hidden=false;$('ota-file').click();});
 $('ota-file').addEventListener('change',async()=>{
   const file=$('ota-file').files[0];selectedFirmware=null;$('firmware-selected').textContent='Prüfe Datei …';
   try{const info=await TeeNetFirmware.inspect(file,state?.ota_max_bytes);if($('ota-file').files[0]!==file)return;selectedFirmware={file,info};$('firmware-selected').textContent=`TeeNet ${info.version}`;$('ota-status').textContent=info.integrity?'Datei geprüft. Bereit zur Installation.':'Dateityp passt. Vollständige Prüfung bei der Installation.';}
@@ -609,7 +687,7 @@ async function waitGitHub(){
 let githubRelease=null;
 $('github-check').addEventListener('click',()=>action(async()=>{
   githubRelease=null;$('github-install').hidden=true;
-  await api('/api/update/github',{action:'check'});const result=await waitGitHub();githubRelease=result;
+  await api('/api/update/github',{action:'check'});const result=await waitGitHub();githubRelease=result;window.dispatchEvent(new CustomEvent('teenet-release',{detail:{version:result.version}}));
   $('github-install').hidden=!result.newer;$('github-install').textContent=`TeeNet ${result.version} installieren`;
   $('github-status').textContent=result.newer?`TeeNet ${result.version} verfügbar.`:`GitHub: TeeNet ${result.version}. Installierte Version ${state.version} ist aktuell oder neuer.`;
 }));
@@ -626,7 +704,7 @@ $('github-install').addEventListener('click',()=>action(async()=>{
   finally{uploading=false;}
 }));
 let statusPromise=null,loadedBuild='';
-async function pollStatus(){if(statusPromise)return statusPromise;statusPromise=(async()=>{const next=await api('/api/status',undefined,12000);if(loadedBuild&&next.build_id&&loadedBuild!==next.build_id){window.location.reload();return;}loadedBuild=next.build_id||loadedBuild;window.TeeNetHealth?.observe(next);state=next;token=state.token;statusFailures=0;showConnection(true);render();const updateMessage=window.TeeNetFirmware?.checkBoot(next);if(updateMessage){$('ota-status').textContent=updateMessage;toast(updateMessage);}})();try{return await statusPromise;}finally{statusPromise=null;}}
+async function pollStatus(){if(statusPromise)return statusPromise;statusPromise=(async()=>{const next=await api('/api/status',undefined,12000);if(loadedBuild&&next.build_id&&loadedBuild!==next.build_id){window.location.reload();return;}loadedBuild=next.build_id||loadedBuild;window.TeeNetHealth?.observe(next);state=next;settingsRebootPending=!!next.reboot_required;if(!settingsRebootPending)settingsRebootDeferred=false;updateUnsavedFunctions();token=state.token;statusFailures=0;showConnection(true);render();const updateMessage=window.TeeNetFirmware?.checkBoot(next);if(updateMessage){$('ota-status').textContent=updateMessage;toast(updateMessage);}})();try{return await statusPromise;}finally{statusPromise=null;}}
 
 async function loadHistory(){if(historyBusy||!online||document.hidden)return;historyBusy=true;lastHistoryAt=Date.now();try{history=await api('/api/history',undefined,15000);drawCharts();}catch(error){}finally{historyBusy=false;}}
 
@@ -638,12 +716,58 @@ function pollDelay(){
   return !$('settings').hidden?5000:10000;
 }
 function schedulePoll(delay=2000){clearTimeout(pollTimer);if(!document.hidden)pollTimer=setTimeout(poll,delay);}
-async function poll(){if(pollRunning||document.hidden)return;pollRunning=true;try{if(busy||uploading)return;await pollStatus();if(!initialized){await loadConfig();initialized=true;writes();}if(!$('statistics').hidden){const now=Date.now();if(now-lastHistoryAt>=60000)loadHistory();if(now-lastSessionsAt>=30000)loadSessions();}}catch(error){if(++statusFailures>=2){showConnection(false);render();}}finally{pollRunning=false;schedulePoll(statusFailures?Math.min(30000,2000*2**Math.min(statusFailures,4)):pollDelay());}}
+async function poll(){if(pollRunning||document.hidden)return;pollRunning=true;try{if(busy||uploading)return;await pollStatus();if(!initialized){await loadConfig();initialized=true;updateUnsavedFunctions();writes();}if(!$('statistics').hidden){const now=Date.now();if(now-lastHistoryAt>=60000)loadHistory();if(now-lastSessionsAt>=30000)loadSessions();}}catch(error){if(++statusFailures>=2){showConnection(false);render();}}finally{pollRunning=false;schedulePoll(statusFailures?Math.min(30000,2000*2**Math.min(statusFailures,4)):pollDelay());}}
 document.addEventListener('visibilitychange',()=>{clearTimeout(pollTimer);if(!document.hidden){lastHistoryAt=lastSessionsAt=-Infinity;schedulePoll(0);}});
 
-window.addEventListener('resize',drawCharts);
+function updateHeaderOffset(){
+  const header=document.querySelector('.app-header');
+  if(!header)return;
+  const height=getComputedStyle(header).position==='sticky'?Math.ceil(header.getBoundingClientRect().height)+16:24;
+  document.documentElement.style.setProperty('--header-offset',`${height}px`);
+}
+window.addEventListener('resize',()=>{drawCharts();updateHeaderOffset();});
+if(typeof ResizeObserver!=='undefined')new ResizeObserver(updateHeaderOffset).observe(document.querySelector('.app-header'));
+updateHeaderOffset();
 
-function showPage(){const anchor=location.hash.slice(1),groups=['setup-assistant','equipment-settings','opendtu-settings','huawei-settings','relay-settings','connection-settings','shell-settings','meter-settings','house-settings','hardware-settings','consumption-settings','mqtt-settings','vehicle-settings','diagnostic-settings','maintenance','appearance-settings'];const page=anchor==='statistics'?'statistics':anchor==='settings'||groups.includes(anchor)?'settings':'overview';for(const id of ['overview','statistics','settings'])$(id).hidden=id!==page;document.querySelectorAll('nav a').forEach(a=>{const active=a.getAttribute('href')==='#'+page;a.classList.toggle('active',active);if(active)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});if(page==='statistics'&&initialized){loadHistory();loadSessions();}if(groups.includes(anchor)){for(let section=$(anchor);section;section=section.parentElement)if(section.tagName==='DETAILS')section.open=true;}requestAnimationFrame(()=>{drawCharts();if(groups.includes(anchor))$(anchor).scrollIntoView({block:'start'});else window.scrollTo(0,0);});}
+function showPage(){const anchor=location.hash.slice(1),groups=['equipment-settings','opendtu-settings','huawei-settings','relay-settings','connection-settings','shell-settings','meter-settings','house-settings','hardware-settings','consumption-settings','mqtt-settings','evcc-settings','vehicle-settings','diagnostic-settings','maintenance','appearance-settings'];const page=anchor==='statistics'?'statistics':anchor==='settings'||groups.includes(anchor)?'settings':'overview';for(const id of ['overview','statistics','settings'])$(id).hidden=id!==page;document.querySelector('.status-wrap').hidden=page!=='overview';document.querySelectorAll('nav a').forEach(a=>{const active=a.getAttribute('href')==='#'+page;a.classList.toggle('active',active);if(active)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});if(page==='statistics'&&initialized){loadHistory();loadSessions();}if(groups.includes(anchor)){for(let section=$(anchor);section;section=section.parentElement)if(section.tagName==='DETAILS')section.open=true;}requestAnimationFrame(()=>{drawCharts();if(groups.includes(anchor))$(anchor).scrollIntoView({block:'start'});else window.scrollTo(0,0);});}
+
+// Release display belongs to Update & Help. The browser queries GitHub.
+let latestInstalledVersion='',latestPublishedVersion='',latestReleaseCheckedAt=0,latestReleasePromise=null,latestReleaseUnavailable=false;
+const releaseVersion=value=>typeof value==='string'&&/^\d+\.\d+$/.test(value)?value:'';
+function renderLatestRelease(){
+  const value=$('available-version');if(!value)return;
+  if(!latestPublishedVersion){value.textContent=latestReleaseUnavailable?'Derzeit nicht erreichbar':'Noch nicht geprüft';return;}
+  let label='';
+  if(latestInstalledVersion){
+    const installed=latestInstalledVersion.split('.').map(Number),available=latestPublishedVersion.split('.').map(Number);
+    const difference=available[0]-installed[0]||available[1]-installed[1];
+    label=difference>0?' · Update verfügbar':difference<0?' · installierte Version ist neuer':' · aktuell';
+  }
+  value.textContent=`TeeNet ${latestPublishedVersion}${label}${latestReleaseUnavailable?' · zuletzt geprüft':''}`;
+}
+window.addEventListener('teenet-status',event=>{latestInstalledVersion=releaseVersion(event.detail?.version);renderLatestRelease();});
+window.addEventListener('teenet-release',event=>{
+  const version=releaseVersion(event.detail?.version);
+  if(version){latestPublishedVersion=version;latestReleaseCheckedAt=Date.now();latestReleaseUnavailable=false;renderLatestRelease();}
+});
+async function loadLatestRelease(){
+  if(!$('available-version'))return;
+  if(latestReleasePromise||Date.now()-latestReleaseCheckedAt<(latestReleaseUnavailable?45000:600000))return latestReleasePromise;
+  $('available-version').textContent='Wird geprüft …';
+  latestReleasePromise=(async()=>{
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
+    try{
+      const response=await fetch('https://api.github.com/repos/stetastic/TeeNet/releases/latest',{signal:controller.signal,headers:{Accept:'application/vnd.github+json'}});
+      if(!response.ok)throw Error('GitHub nicht erreichbar');
+      const release=await response.json(),version=releaseVersion(typeof release.tag_name==='string'?release.tag_name.replace(/^v/,''):'');
+      if(!version||release.draft||release.prerelease)throw Error('Keine passende Version');
+      latestPublishedVersion=version;latestReleaseUnavailable=false;
+    }catch(error){latestReleaseUnavailable=true;}
+    finally{latestReleaseCheckedAt=Date.now();clearTimeout(timer);latestReleasePromise=null;renderLatestRelease();}
+  })();
+  return latestReleasePromise;
+}
+$('maintenance').addEventListener('toggle',()=>{if($('maintenance').open)loadLatestRelease();});
 
 const donateUrl=$('donate-link').href;
 let qrLoading=false;

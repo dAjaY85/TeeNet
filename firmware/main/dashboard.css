@@ -126,8 +126,8 @@
 #manual-current-label label{margin-top:12px;font-size:12px}
 #desired-power{display:block;margin-top:4px;font-size:30px;font-weight:650;letter-spacing:-1px;font-variant-numeric:tabular-nums;color:#244a62}
 .slider-bounds{display:flex;justify-content:space-between;color:#78909e;font-size:11px}
-.power-meter .track{margin:0;height:8px}
-.power-meter small{display:block;text-align:right;margin-top:7px;font-size:11px;color:#78909e}
+
+
 .battery-choice button{background:#fff3d8;border-color:#e6c478;color:#896116}
 .battery-choice button[aria-pressed=true]{background:#e4f5eb;border-color:#83c9a1;color:#23734c}
 .battery-choice+.battery-choice{margin-top:0}
@@ -202,21 +202,21 @@ html[data-expert="false"] .expert-only,html[data-expert="false"] #settings detai
 
 /* The optional plan shares the power-setting position inside the charging card. */
 .charge-plan{margin:0 0 18px;padding:16px;border:1px solid #d8e6ed;border-radius:12px;background:#f5f9fb;min-width:0}.charge-plan summary{font-size:15px;font-weight:650;color:#285777;cursor:pointer}.charge-plan[open]>summary{margin-bottom:8px}.charge-plan>.footnote{display:block;margin:0 0 12px;line-height:1.5}.charge-plan>small.footnote{margin:12px 0 0}.charge-plan .info-box{margin:12px 0}.charge-plan .actions{margin-top:12px}.charge-plan input{min-width:0}.charge-plan progress{width:100%;height:8px;accent-color:#327da9;margin:0 0 16px}.charge-plan .info-box{overflow-wrap:anywhere}
-.wizard{margin-bottom:16px}.wizard h3{margin:0;color:#285777}.wizard p{line-height:1.55}.wizard-footer{display:flex;align-items:center;justify-content:space-between;gap:12px}.wizard-footer>span{color:#728494;white-space:nowrap}
-[data-wizard="true"] .settings-mode,[data-wizard="true"] .save-row{display:none!important}
-[data-wizard="true"] #charge-settings:not([hidden]),[data-wizard="true"] #diagnostic-settings:not([hidden]){display:block!important}
+
+
+
 .event-list{padding:0;list-style:none;margin:14px 0;max-height:420px;overflow:auto}.event-list li{padding:12px 0;border-bottom:1px solid #e3ebef;display:grid;gap:5px}.event-list time{font-size:.75rem;color:#728494}.event-list strong{font-size:.88rem;font-weight:600}.event-list small{color:#728494;line-height:1.5}
-@media(max-width:560px){.wizard-footer{align-items:flex-start}.wizard-footer .actions{flex-wrap:wrap;justify-content:flex-end}.section-top{gap:12px;flex-wrap:wrap}.charge-plan .form-pair{grid-template-columns:1fr}.charge-plan .actions{flex-wrap:wrap}}
+@media(max-width:560px){.section-top{gap:12px;flex-wrap:wrap}.charge-plan .form-pair{grid-template-columns:1fr}.charge-plan .actions{flex-wrap:wrap}}
 
-.brand-caption{font-size:12px;line-height:1.5;color:var(--muted);text-align:center;margin:12px 0 0}.donate-dialog{width:min(520px,calc(100vw - 28px));max-height:90vh;overflow:auto}.donate-logo{display:block;width:min(100%,380px);height:auto;margin:20px auto;background:#fff;border-radius:14px}.setup-assistant{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px;border-radius:14px;background:#eef6fa;margin:0 0 20px}.setup-assistant small{display:block;color:var(--muted)}@media(max-width:850px){.brand-caption{font-size:11px;margin:0 10px;max-width:200px}}@media(max-width:600px){.brand-caption{font-size:10px;max-width:145px}.setup-assistant{align-items:flex-start;flex-direction:column}}
+.brand-caption{font-size:12px;line-height:1.5;color:var(--muted);text-align:center;margin:12px 0 0}.donate-dialog{width:min(520px,calc(100vw - 28px));max-height:90vh;overflow:auto}.donate-logo{display:block;width:min(100%,380px);height:auto;margin:20px auto;background:#fff;border-radius:14px}@media(max-width:850px){.brand-caption{font-size:11px;margin:0 10px;max-width:200px}}@media(max-width:600px){.brand-caption{font-size:10px;max-width:145px}}
 
-html[data-wizard="true"] #settings .settings-group:not([hidden]),html[data-wizard="true"] #equipment-settings:not([hidden]){display:block!important}#huawei-preview-values{font-size:16px;white-space:normal;line-height:1.6}
+#huawei-preview-values{font-size:16px;white-space:normal;line-height:1.6}
 
-html[data-wizard="true"] .settings-grid{grid-template-columns:minmax(0,1fr);max-width:760px}html[data-wizard="true"] #wizard,html[data-wizard="true"] #wizard-footer,html[data-wizard="true"] #equipment-settings{max-width:760px}#wizard-footer{margin-top:18px;margin-bottom:0}#wizard-footer .actions{margin:0}html[data-wizard="true"] #config-form{max-width:760px}
+
 .wifi-pick input,.password-row input{min-width:0}
 @media(max-width:600px){.rail{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px}.rail .brand{grid-column:1;grid-row:1}.rail .brand-caption{grid-column:1;grid-row:2;text-align:left;margin:0;max-width:none}.rail nav{grid-column:2;grid-row:1/3}.password-row{flex-wrap:wrap}.password-row input{flex:1 0 100%}.password-row .button{flex:1}}
 
-#setup-assistant{margin:0 0 20px;border:1px solid #cddfe8}#setup-assistant h3{margin:0;color:#285777;font-size:15px}
+
 
 /* Connections share one settings card in both views. */
 .data-source+.data-source{margin-top:24px;padding-top:22px;border-top:1px solid var(--line,#e0e8ed)}.data-source h3{font-size:1rem;margin:0 0 14px}.connection-details{margin-top:12px}#huawei-preview-values{font-size:1rem;line-height:1.65;overflow-wrap:anywhere}
@@ -225,7 +225,7 @@ html[data-wizard="true"] .settings-grid{grid-template-columns:minmax(0,1fr);max-
 .theme-picker{display:flex;gap:10px;max-width:420px}.theme-picker .button{flex:1}.theme-picker .button[aria-pressed="true"]{background:var(--green);border-color:var(--green);color:#fff}
 
 /* A single gap keeps optional and regular settings cards aligned. */
-.settings-grid{display:flex;flex-direction:column;gap:12px}.settings-grid>.settings-group{margin:0}#setup-assistant{margin-bottom:12px}.settings-mode{margin-top:12px;margin-bottom:12px;padding:16px 24px}.settings-mode strong{font-size:15px;font-weight:650}#battery-settings>summary{color:#244a62}
+.settings-grid{display:flex;flex-direction:column;gap:12px}.settings-grid>.settings-group{margin:0}.settings-mode{margin-top:12px;margin-bottom:12px;padding:16px 24px}.settings-mode strong{font-size:15px;font-weight:650}#battery-settings>summary{color:#244a62}
 .firmware-info{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;padding:12px 16px;background:#f2f7fa;border-radius:10px;font-size:12px;color:#6d8796;margin:0 0 14px}.firmware-info strong{font-size:14px;color:#244a62;font-weight:650}
 
 #shell-pin-settings select option:disabled{color:#8a96a0}#shell-pin-warning{color:#8a4d13;background:#fff4e2}
@@ -274,10 +274,10 @@ html[data-basic=true] #event-panel{display:none!important}
 html[data-theme="dark"]{color-scheme:dark;--ink:#e6eef5;--muted:#a4b7c6;--line:#304454;--green:#54c5e3;--mint:#183c34;--bg:#0e1821;--amber:#edbb70;--surface:#172530;--raised:#20323f;--accent:#74d7ed;--shadow:0 8px 28px #0002}
 html[data-theme="dark"] body{background:var(--bg);color:var(--ink)}
 html[data-theme="dark"] :is(.panel,.metric,.house-card[data-direction],.battery-card[data-inactive=true],.donate-dialog){background:var(--surface);border-color:var(--line);color:var(--ink);box-shadow:var(--shadow)}
-html[data-theme="dark"] :is(h1,h2,h3,.scene-heading h2,.house-card h2,.scene-detail strong,.target-reading strong,.battery-summary strong,.pv-reading b,.house-battery-power b,.session-totals b,.firmware-info strong,.phase b,#desired-power,#battery-settings>summary,#setup-assistant h3){color:var(--ink)}
-html[data-theme="dark"] :is(label,small,.muted,.footnote,.control-caption,.scene-reading span,.scene-reading small,.scene-detail span,.scene-detail small,.battery-summary span,.battery-choice small,.battery-limits,.battery-heading #battery-mode-note,.slider-bounds,.power-meter small,.target-reading,.energy-summary small,.session-totals>span,.sessions-panel td small,.history-reset small,.pv-reading small,.house-card[data-direction] #house-caption,.signal,.signal small,.event-list time,.event-list small,.wizard-footer>span,.donate-dialog p,.donate-dialog small,.brand-caption,.unit,.metric-label,.metric-foot,th,footer){color:var(--muted)}
+html[data-theme="dark"] :is(h1,h2,h3,.scene-heading h2,.house-card h2,.scene-detail strong,.target-reading strong,.battery-summary strong,.pv-reading b,.house-battery-power b,.session-totals b,.firmware-info strong,.phase b,#desired-power,#battery-settings>summary){color:var(--ink)}
+html[data-theme="dark"] :is(label,small,.muted,.footnote,.control-caption,.scene-reading span,.scene-reading small,.scene-detail span,.scene-detail small,.battery-summary span,.battery-choice small,.battery-limits,.battery-heading #battery-mode-note,.slider-bounds,.target-reading,.energy-summary small,.session-totals>span,.sessions-panel td small,.history-reset small,.pv-reading small,.house-card[data-direction] #house-caption,.signal,.signal small,.event-list time,.event-list small,.donate-dialog p,.donate-dialog small,.brand-caption,.unit,.metric-label,.metric-foot,th,footer){color:var(--muted)}
 html[data-theme="dark"] :is(.scene-detail,.scene-detail>div+div,.battery-choice,.battery-power-row,.target-reading,.session-totals,.session-totals>span,.stat-footer,.history-reset,.maintenance-block,.maintenance-subheading,.event-list li,td,th,footer){border-color:var(--line)}
-html[data-theme="dark"] :is(.bus-card,.info-box,.diagnostics div,.meter-preview,.feature-box,.phase-option,.charge-plan,.firmware-info,.setup-assistant,.setup-check-row,.equipment-checks .check-label,.relay-readings>div,code,.pv-reading,.house-battery-power){background:var(--raised);border-color:var(--line);color:var(--ink)}
+html[data-theme="dark"] :is(.bus-card,.info-box,.diagnostics div,.meter-preview,.feature-box,.phase-option,.charge-plan,.firmware-info,.setup-check-row,.equipment-checks .check-label,.relay-readings>div,code,.pv-reading,.house-battery-power){background:var(--raised);border-color:var(--line);color:var(--ink)}
 html[data-theme="dark"] .equipment-panel label:has(input:checked){background:#1b3c4c}
 html[data-theme="dark"] :is(.advanced summary,.maintenance-block summary,.charge-plan summary,.bus-card>strong,.bus-card a,.battery-slider-label output,.text-button){color:var(--accent)}
 html[data-theme="dark"] :is(input,select){background:#101e29;border-color:#415b6e;color:var(--ink)}
@@ -324,7 +324,7 @@ html[data-theme="dark"] [data-stale=true]{color:#edbb70!important}
 html[data-theme="dark"] .dialog-close{color:var(--muted)}
 html[data-theme="dark"] #toast{background:#224758;color:var(--ink)}
 html[data-theme="dark"] #toast.error{background:#603832;color:#fff}
-html[data-theme="dark"] #setup-assistant{border-color:var(--line)}
+
 
 /* Maintenance actions use one consistent full-width stack in both modes. */
 #maintenance>.maintenance-block{margin:12px 0 0;padding:18px;border:1px solid var(--line);border-radius:12px;background:transparent}
@@ -334,3 +334,70 @@ html[data-theme="dark"] #setup-assistant{border-color:var(--line)}
 #maintenance .maintenance-block .button{min-height:42px;white-space:normal}
 #maintenance .maintenance-block .actions>.button{margin:0;width:100%;align-self:stretch}
 @media(max-width:600px){#maintenance>.maintenance-block{padding:16px}#maintenance .maintenance-block .actions{grid-template-columns:1fr}}
+
+/* Private evcc ownership: controls belong to the external charging manager. */
+.evcc-owner-banner{padding:20px;border-radius:14px;border:1px solid #b6dfe9;background:#edf8fc;margin:12px 0 16px}
+.evcc-owner-label{display:block;color:#007fa8;font-size:12px;font-weight:750;letter-spacing:.06em;text-transform:uppercase;margin-bottom:7px}
+.evcc-owner-banner strong{display:block;font-size:clamp(21px,2vw,26px);line-height:1.2;color:#124357}
+.evcc-owner-banner p{font-size:14px;color:#496474;margin:9px 0 15px}
+.evcc-controlled #apply-control{font-size:15px;min-height:42px;background:transparent;border:1px solid var(--line);color:var(--ink)}
+html[data-theme="dark"] .evcc-owner-banner{background:#142e3d;border-color:#315767}
+html[data-theme="dark"] .evcc-owner-label{color:#65d4ee}
+html[data-theme="dark"] .evcc-owner-banner strong{color:#edf6fa}
+html[data-theme="dark"] .evcc-owner-banner p{color:#b1c7d3}
+
+
+#maintenance .maintenance-latest{margin:6px 0 18px}.maintenance-latest strong{font-weight:600;color:var(--ink)}
+
+#local-firmware-update{margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
+
+#maintenance .help-block .actions{grid-template-columns:1fr}
+#usage-notice{width:100%;margin:16px 0 0}
+main:has(>#settings:not([hidden]))>#usage-notice{max-width:960px}
+
+
+#usage-notice a{display:inline-block;margin-left:6px;text-decoration:underline;text-underline-offset:2px}
+
+.terms-dialog{width:min(550px,calc(100vw - 32px));max-height:85vh;overflow:auto;border:1px solid var(--border,#dbe8ed);border-radius:18px;padding:26px;background:var(--panel,#fff);color:var(--text,#244a62)}
+.terms-dialog::backdrop{background:#102b40b0;backdrop-filter:blur(3px)}
+.terms-dialog p{line-height:1.5}.terms-dialog .check-label{align-items:flex-start;margin:20px 0}
+html[data-theme="dark"] .terms-dialog{background:#152a38;color:#dce8ef;border-color:#355062}
+
+.system-version{display:inline-block;margin-left:10px;padding:2px 8px;border:1px solid var(--line);border-radius:6px;color:var(--muted);font-size:.8em;font-weight:500;vertical-align:middle;white-space:nowrap}
+
+#reboot{min-width:200px;min-height:52px;padding:13px 28px;font-size:1.08rem;font-weight:650}@media(max-width:480px){#reboot{width:100%}.save-actions{width:100%}}
+
+#settings .save-row{justify-content:flex-start}#settings .save-actions{justify-content:flex-start;margin-left:0}
+
+.unsaved-banner{position:fixed;z-index:40;left:50%;right:auto;bottom:20px;transform:translateX(-50%);width:min(570px,calc(100vw - 48px));display:flex;align-items:center;gap:12px;margin:0;padding:13px 16px;border:1px solid #b9d6e2;border-radius:14px;background:#f7fcff;color:#244a62;box-shadow:0 8px 26px #17394f24}.unsaved-banner[hidden]{display:none}.unsaved-banner>div:not(.notice-restart-actions){flex:1;min-width:0}.unsaved-banner strong,.unsaved-banner span:not(.unsaved-symbol){display:block}.unsaved-banner strong{font-size:.95rem;margin-bottom:2px}.unsaved-banner span:not(.unsaved-symbol){font-size:.8rem;color:var(--muted)}.unsaved-symbol{display:grid;place-items:center;flex:0 0 36px;width:36px;height:36px;font-size:1.3rem;border-radius:10px;background:#e1f1f8;color:#087da0}.unsaved-banner .button{margin-left:auto;white-space:nowrap;min-height:40px}.notice-restart-actions{display:flex;align-items:center;gap:8px;margin-left:auto}.notice-restart-actions .button{margin-left:0}.unsaved-banner[data-kind="restart"]{flex-wrap:wrap}.unsaved-banner[data-kind="restart"] .notice-restart-actions{width:100%;justify-content:flex-end}.notice-restart-actions #settings-notice-later{white-space:normal;color:inherit;border-color:#b9d6e2;background:transparent}#config-form:has(.unsaved-banner:not([hidden])){padding-bottom:130px}html[data-theme="dark"] .unsaved-banner{background:var(--surface);color:var(--ink);border-color:#456579}html[data-theme="dark"] .unsaved-symbol{background:#203e50;color:#74d7ed}@media(max-width:600px){.unsaved-banner{bottom:12px;width:calc(100vw - 24px);gap:10px;padding:12px}.unsaved-banner strong{font-size:.88rem}.unsaved-banner span:not(.unsaved-symbol){font-size:.75rem}.unsaved-banner .button{font-size:.8rem;padding:9px 12px}.notice-restart-actions .button{flex:1}}
+
+/* Keep status and navigation together; match the settings column width. */
+.app-header{display:contents}
+html{scroll-padding-top:var(--header-offset,24px)}
+main>#overview,main>#statistics,main>#settings{scroll-margin-top:100px}
+.status-wrap{max-width:1500px;margin-left:220px;padding:28px 44px 20px}
+.status-wrap .control-status{margin:0;background:#fff}
+main{padding-top:0}
+body:has(#settings:not([hidden])) .status-wrap .control-status{max-width:960px}
+html[data-theme="dark"] .status-wrap .control-status{background:#172530}
+.status-wrap .control-status[data-kind="fault"]{background:#fff5f1}
+html[data-theme="dark"] .status-wrap .control-status[data-kind="fault"]{background:#3b282d}
+@media(min-width:1600px){.status-wrap{padding-left:65px;padding-right:65px}}
+@media(max-width:1150px){.status-wrap{margin-left:180px;padding:28px 24px 20px}}
+@media(max-width:850px){
+  .app-header{display:block;position:sticky;top:0;z-index:30;margin:0;background:#fff;border-bottom:1px solid var(--line);box-shadow:0 3px 14px #17394f0a}
+  .app-header .rail{position:static}
+  .status-wrap{margin:0;padding:0 22px 12px;max-width:none}
+  .status-wrap .control-status{border:0;border-top:1px solid var(--line);border-radius:0;padding:10px 0 0;background:transparent;min-height:36px}
+  .status-wrap .control-status[data-kind="fault"]{border:1px solid #edcfc5;border-radius:8px;padding:9px 10px}
+  main{padding-top:18px}
+  html{scroll-padding-top:var(--header-offset,190px)}
+  main>#overview,main>#statistics,main>#settings{scroll-margin-top:0}
+  html[data-theme="dark"] .app-header,html[data-theme="dark"] .status-wrap .control-status{background:#101e29}
+  html[data-theme="dark"] .status-wrap .control-status[data-kind="fault"]{background:#3b282d;border-color:#85504d}
+}
+@media(max-width:600px){.status-wrap{padding:0 16px 10px}.app-header .rail{padding-bottom:10px}}
+
+/* The status row belongs to overview only. */
+.app-header:has(.status-wrap[hidden])+main{padding-top:28px}
+@media(max-width:850px){.app-header:has(.status-wrap[hidden])+main{padding-top:18px}}

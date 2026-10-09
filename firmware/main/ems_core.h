@@ -13,7 +13,7 @@
 #define EMS_CHARGE_STOP_CONFIRM_MS 20000
 #define EMS_CHARGE_STOP_LIMIT 5
 #define EMS_CHARGE_STOP_WINDOW_MS 300000
-#define EMS_SETTINGS_VERSION 26
+#define EMS_SETTINGS_VERSION 27
 #define EMS_MIN_CHARGE_A 6.0f
 #define EMS_BATTERY_CAPACITY_KWH 20.0f
 #define EMS_BATTERY_DISCHARGE_MAX_W 4000.0f
@@ -117,11 +117,17 @@ typedef struct {
     char opendtu_prefix[96], opendtu_pv_topic[160], opendtu_pv_valid_topic[160];
     bool opendtu_current_positive_discharge;
 
+    /* Version 27: transparent RTU-over-TCP gateways, independent per bus. */
+    uint8_t shell_rs485_interface, meter_rs485_interface, house_rs485_interface;
+    char shell_rs485_host[64], meter_rs485_host[64], house_rs485_host[64];
+    bool evcc_feature_enabled;
+
 } settings_t;
 
 int relay_output_level(bool active_low, bool energized);
 void settings_fixed_pins(settings_t *settings);
 void settings_basic_mode(settings_t *settings);
+bool rs485_endpoint_valid(const char *text, size_t capacity);
 
 typedef struct {
     int64_t since,last_sample;

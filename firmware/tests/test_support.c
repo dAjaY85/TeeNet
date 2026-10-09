@@ -1,5 +1,6 @@
 #include "diagnostic_store.h"
 #include "firmware_check.h"
+#include "hardware_profile.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -12,9 +13,9 @@ int main(void){
     assert(!diagnostic_store_restore(&copy,&store,sizeof(store)-1));store.entries[0].actual_kw=123;assert(!diagnostic_store_restore(&copy,&store,sizeof(store)));
     diagnostic_store_seal(&store);store.count=17;diagnostic_store_seal(&store);assert(!diagnostic_store_restore(&copy,&store,sizeof(store)));
     diagnostic_store_init(&store);memset(e.reason,'x',sizeof(e.reason));assert(!diagnostic_store_add(&store,&e));
-    uint8_t bytes[288]={0};char version[32];bytes[0]=0xe9;bytes[1]=4;bytes[12]=9;bytes[32]=0x32;bytes[33]=0x54;bytes[34]=0xcd;bytes[35]=0xab;
+    uint8_t bytes[288]={0};char version[32];bytes[0]=0xe9;bytes[1]=4;bytes[3]=EMS_FLASH_SIZE_NIBBLE;bytes[12]=9;bytes[32]=0x32;bytes[33]=0x54;bytes[34]=0xcd;bytes[35]=0xab;
     strcpy((char *)bytes+48,"1.10");strcpy((char *)bytes+80,"wallbox_ems");assert(firmware_prefix_check(bytes,sizeof(bytes),version));assert(!strcmp(version,"1.10"));
-    assert(!firmware_prefix_check(bytes,287,version));bytes[12]=0;assert(!firmware_prefix_check(bytes,sizeof(bytes),version));bytes[12]=9;
+    assert(!firmware_prefix_check(bytes,287,version));bytes[3]^=0x70;assert(!firmware_prefix_check(bytes,sizeof(bytes),version));bytes[3]=EMS_FLASH_SIZE_NIBBLE;bytes[12]=0;assert(!firmware_prefix_check(bytes,sizeof(bytes),version));bytes[12]=9;
     strcpy((char *)bytes+80,"other_project");assert(!firmware_prefix_check(bytes,sizeof(bytes),version));strcpy((char *)bytes+80,"wallbox_ems");
     strcpy((char *)bytes+48,"1.");assert(!firmware_prefix_check(bytes,sizeof(bytes),version));strcpy((char *)bytes+48,"1.10.1");assert(!firmware_prefix_check(bytes,sizeof(bytes),version));
     memset(bytes+48,'1',32);assert(!firmware_prefix_check(bytes,sizeof(bytes),version));

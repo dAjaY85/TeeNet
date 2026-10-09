@@ -7,8 +7,10 @@
 #include "ems_features.h"
 #include "diagnostic_store.h"
 #include "firmware_check.h"
+#include "hardware_profile.h"
 #include "ems_build.h"
 
+#include "evcc_bridge.h"
 #include "meter_json.h"
 #include "shelly_modbus.h"
 #include "em24_modbus.h"
@@ -100,6 +102,17 @@
 #define UNLOCK() xSemaphoreGive(state_lock)
 
 static settings_t settings,saved_settings;
+static uint32_t wallbox_meter_revision,house_meter_revision;
+static evcc_control_t evcc_control;
+static evcc_shell_t evcc_shell={.state='?',.reason="pending"};
+static char evcc_host[64],evcc_key[33];
+static int64_t evcc_shell_at;
+static int evcc_shell_http_code;
+static uint32_t evcc_poll_generation;
+static bool evcc_configuring;
+#define TERMS_REVISION "2026-10-09.2"
+static bool terms_accepted;
+static uint32_t loaded_settings_version;
 
 static energy_t energy;
 static double energy_reset_wh[EMS_SOURCES];
@@ -151,7 +164,7 @@ static char shell_found_host[4][64],shell_active_host[64];
 static float shell_found_grid[4],shell_found_max[4],shell_grid_a,shell_max_a;
 static int64_t shell_limits_at;
 static int shell_limits_code;
-static bool house_bus_ready,relay_ready,relay_on[2];
+static bool house_bus_ready,relay_ready,relay_on[1];
 
 static bool config_storage_ok,stats_storage_ok,storage_error,reboot_required,restarting,sntp_ready,factory_reset_requested;
 
@@ -282,6 +295,7 @@ static void load_settings(void) {
 
             if(err==ESP_ERR_NVS_NOT_FOUND) continue;
 
+            if(err==ESP_OK && len>=sizeof(uint32_t))memcpy(&loaded_settings_version,blob,sizeof(uint32_t));
             if(err!=ESP_OK || !settings_decode(blob,len,&settings)) ESP_LOGW(TAG,"Stored settings rejected; defaults loaded");
 
             break;
@@ -498,8 +512,8 @@ static bool phase_can_unlock_locked(int64_t now) {
 }
 
 static void relay_set(unsigned index,bool energized) {
-    if(!relay_ready || !settings.relay_board_enabled || index>1) return;
-    gpio_set_level(index?settings.relay2_pin:settings.relay1_pin,
+    if(!relay_ready || !settings.relay_board_enabled || index>0) return;
+    gpio_set_level(settings.relay1_pin,
         relay_output_level(settings.relay_active_low,energized));
     relay_on[index]=energized;
 }
@@ -508,12 +522,12 @@ static void phase_setup(void) {
     settings.charge_phases=settings.phase_switch_enabled?3:settings.fixed_charge_phases; settings.manual_phases=settings.charge_phases;
     if(!settings.relay_board_enabled) return;
     int off=relay_output_level(settings.relay_active_low,false);
-    gpio_set_level(settings.relay1_pin,off); gpio_set_level(settings.relay2_pin,off);
-    gpio_config_t output={.pin_bit_mask=(1ULL<<settings.relay1_pin)|(1ULL<<settings.relay2_pin),.mode=GPIO_MODE_OUTPUT,
+    gpio_set_level(settings.relay1_pin,off);
+    gpio_config_t output={.pin_bit_mask=(1ULL<<settings.relay1_pin),.mode=GPIO_MODE_OUTPUT,
         .pull_up_en=settings.relay_active_low?GPIO_PULLUP_ENABLE:GPIO_PULLUP_DISABLE,
         .pull_down_en=settings.relay_active_low?GPIO_PULLDOWN_DISABLE:GPIO_PULLDOWN_ENABLE,.intr_type=GPIO_INTR_DISABLE};
     relay_ready=gpio_config(&output)==ESP_OK;
-    relay_set(0,false); relay_set(1,false);
+    relay_set(0,false);
     if(!settings.phase_switch_enabled) return;
     if(!settings.phase_feedback_enabled) phase_gpio_ready=relay_ready;
     else {
@@ -555,7 +569,7 @@ static void mode_transition_locked(control_mode_t previous,float previous_target
 
 static void contacts_step_locked(int64_t now) {
     if(!contact_gpio_ready) return;
-    if(settings.external_mode_input_enabled) {
+    if(settings.external_mode_input_enabled && !evcc_control.configured && !evcc_configuring) {
         contact_sample(&mode_contact,gpio_get_level(settings.external_mode_input_pin)==0,now);
         control_mode_t wanted=mode_contact.stable?MODE_PV:MODE_MANUAL;
         if(settings.mode!=wanted) {
@@ -604,6 +618,7 @@ static void phase_step_locked(int64_t now) {
                        one bounded attempt. Keep the coil off until a new
                        explicit Start or a changed command arrives. */
                     phase_idle_inhibit=true; phase_goal=3;
+                    if(evcc_control.configured){evcc_control.enabled=false;evcc_control.preparing=false;settings.enabled=false;settings.mode=MODE_OFF;}
                     phase_state=PHASE_STOPPING; phase_stop_at=now; phase_zero_at=0;
                     return;
                 }
@@ -613,6 +628,7 @@ static void phase_step_locked(int64_t now) {
         phase_no_load_since=0;
     }
     if(phase_state==PHASE_STOPPING) {
+        if(evcc_control.configured && evcc_desired_phases(&evcc_control,settings.charge_phases)==3 && phase_goal==1)phase_goal=3;
         bool fresh_meter=fresh(now,actual_at,EMS_METER_TTL);
         float peak=fmaxf(actual_a[0],fmaxf(actual_a[1],actual_a[2]));
         bool zero=fresh_meter && peak<1 && last_sent_current_at>phase_stop_at && fresh(now,wallbox_at,10000);
@@ -638,12 +654,14 @@ static void phase_step_locked(int64_t now) {
         if(!phase_feedback_matches(settings.phase_feedback_enabled,observed,phase_goal)) { phase_state=PHASE_FAULT; return; }
         if(now-phase_move_at>=5000 && meter_at>phase_move_at && wallbox_at>phase_move_at) {
             phase_state=PHASE_READY; phase_hold_until=now+300000;
+            if(evcc_control.configured && phase_goal==1 && evcc_control.preparing)phase_attempt_at=now;
             phase_candidate_at=0; phase_candidate=phase_goal;
         } else if(now-phase_move_at>30000) phase_state=PHASE_FAULT;
         return;
     }
     uint8_t desired=3;
-    if(settings.enabled && settings.mode==MODE_MANUAL) desired=settings.manual_phases;
+    if(evcc_control.configured)desired=(uint8_t)evcc_desired_phases(&evcc_control,settings.charge_phases);
+    else if(settings.enabled && settings.mode==MODE_MANUAL) desired=settings.manual_phases;
     else if(settings.enabled && settings.mode==MODE_PV && settings.zero_feed_enabled) {
         float surplus=phase_surplus_w_locked(now);
         float down=settings.min_charge_a*3*settings.nominal_v*settings.power_factor-300;
@@ -716,6 +734,12 @@ static bool house_currents_ready_locked(int64_t now) {
 }
 
 static float unlatched_target_locked(int64_t now) {
+    if(!terms_accepted || evcc_configuring)return 0;
+    if(evcc_control.configured && (!evcc_control.enabled || evcc_control.inhibited || evcc_control.expired ||
+       evcc_control.last_contact<=0 || now<evcc_control.last_contact || now-evcc_control.last_contact>=EVCC_LEASE_MS ||
+       !evcc_shell_fresh(&evcc_shell,evcc_shell_at,now) || evcc_shell.state=='F'))return 0;
+    if(evcc_control.configured && settings.phase_switch_enabled &&
+       (phase_idle_inhibit || evcc_desired_phases(&evcc_control,settings.charge_phases)!=settings.charge_phases))return 0;
 
     if(reboot_required || restarting || ota_in_progress || unsupported_meter()) return 0;
     if(settings.phase_switch_enabled && phase_state!=PHASE_READY) return 0;
@@ -739,6 +763,7 @@ static float unlatched_target_locked(int64_t now) {
     float target=control_target(&settings,feedback_ready(now) && wallbox_ready && fresh(now,meter_at,EMS_METER_TTL),
 
         fresh(now,actual_at,EMS_METER_TTL),pv_fresh_locked(now));
+    if(evcc_control.configured && settings.charge_phases==1)target=fminf(target,3500/settings.nominal_v);
     if(settings.evu_input_enabled && evu_contact.stable)
         target=settings.evu_limit_a>0?fminf(target,settings.evu_limit_a):0;
     return grid_guard_target(&settings,target,house_currents_ready_locked(now));
@@ -769,6 +794,15 @@ static const char *block_reason_locked(int64_t now) {
     if(restarting || ota_in_progress) return "maintenance";
 
     if(reboot_required) return "reboot";
+    if(!terms_accepted)return "agreement";
+    if(evcc_configuring)return "maintenance";
+    if(evcc_control.configured) {
+        if(evcc_control.inhibited)return "evcc_local_stop";
+        if(evcc_control.expired)return "evcc_timeout";
+        if(!evcc_shell_fresh(&evcc_shell,evcc_shell_at,now))return "evcc_status";
+        if(evcc_shell.state=='F')return "evcc_fault";
+        if(!evcc_control.enabled)return "evcc_waiting";
+    }
     if(settings.phase_switch_enabled && phase_state==PHASE_FAULT) return "phase_fault";
     if(settings.phase_switch_enabled && phase_state!=PHASE_READY) return "phase_switching";
     if(settings.phase_switch_enabled && phase_idle_inhibit && settings.manual_phases==1 && settings.charge_phases==3 && settings.mode==MODE_MANUAL) return "phase_idle";
@@ -889,13 +923,18 @@ static bool init_uart(uart_port_t port,int tx,int rx,int de,int baud,unsigned fo
 
 /* Fixed-length frames avoid a 5 ms delay becoming zero at 100 Hz. */
 
+static bool rs485_tcp(uart_port_t port);
+static int rs485_read(uart_port_t port,uint8_t *data,size_t length,int wait_ms);
+static bool rs485_flush(uart_port_t port);
+static bool rs485_write(uart_port_t port,const uint8_t *data,size_t length,int timeout_ms);
+
 static bool read_exact(uart_port_t port,uint8_t *buffer,size_t count,int64_t deadline) {
 
     size_t got=0;
 
     while(got<count && now_ms()<deadline) {
 
-        int n=uart_read_bytes(port,buffer+got,count-got,ticks(10));
+        int n=rs485_read(port,buffer+got,count-got,10);
 
         if(n<0) return false;
 
@@ -910,8 +949,7 @@ static bool read_exact(uart_port_t port,uint8_t *buffer,size_t count,int64_t dea
 static bool read_xemex_port(uart_port_t port,uint8_t address,int baud,float out[3]) {
     uint8_t req[8]={address,3,0x50,0x0c,0,6}; append_crc(req,6);
     vTaskDelay(ticks((38500u+baud-1)/baud+1));
-    uart_flush_input(port);
-    if(uart_write_bytes(port,req,8)!=8 || uart_wait_tx_done(port,ticks(100))!=ESP_OK) return false;
+    if(!rs485_flush(port) || !rs485_write(port,req,8,100))return false;
     uint8_t response[17];
     return read_exact(port,response,17,now_ms()+300) && decode_meter(response,17,address,out);
 }
@@ -925,8 +963,7 @@ static bool read_meter(float out[3]) {
 static bool read_sdm_registers_port(uart_port_t port,uint8_t address,int baud,uint16_t start,uint16_t count,uint8_t *response,size_t length) {
     uint8_t req[8]={address,4,start>>8,start&255,count>>8,count&255}; append_crc(req,6);
     vTaskDelay(ticks((38500u+baud-1)/baud+1));
-    uart_flush_input(port);
-    if(uart_write_bytes(port,req,8)!=8 || uart_wait_tx_done(port,ticks(100))!=ESP_OK) return false;
+    if(!rs485_flush(port) || !rs485_write(port,req,8,100))return false;
     return read_exact(port,response,length,now_ms()+400) && valid_frame(response,length) &&
         response[0]==address && response[1]==4 && response[2]==count*2;
 }
@@ -952,13 +989,14 @@ static void meter_task(void *arg) {
     while(true) {
         uint32_t delay_ms=1000;
         float values[3],watts=0; bool sdm=sdm_meter(),network=network_wallbox_meter();
+        LOCK();uint32_t revision=wallbox_meter_revision;UNLOCK();
 
         bool ok=!unsupported_meter() && (network?read_wallbox_network(values,&watts):sdm?read_sdm(values,&watts):read_meter(values));
 
         if(ok && !sdm && !network) ok=reconstruct_currents(values,settings.xemex_coils);
 
         LOCK();
-
+        if(network && revision!=wallbox_meter_revision){UNLOCK();continue;}
         if(ok) {
             if(settings.phase_switch_enabled && settings.charge_phases==1 &&
                phase_state==PHASE_READY && sdm_profile(settings.wallbox_meter_type) && sdm_profile(settings.wallbox_meter_type)->phases==3 &&
@@ -983,13 +1021,17 @@ static void meter_task(void *arg) {
 
 static void wallbox_task(void *arg) {
 
-    uint8_t req[8],response[256]; size_t used=0;
+    uint8_t req[8],response[256]; size_t used=0;int64_t last_byte=0;
 
     while(true) {
 
-        int n=uart_read_bytes(WALLBOX_UART,req+used,1,ticks(20));
-
-        if(n!=1) { used=0; continue; }
+        int n=rs485_read(WALLBOX_UART,req+used,1,20);
+        if(n!=1) {
+            if(n<0 || !rs485_tcp(WALLBOX_UART) || now_ms()-last_byte>500)used=0;
+            if(n<0)vTaskDelay(ticks(20));
+            continue;
+        }
+        last_byte=now_ms();
 
         LOCK();
 
@@ -1030,7 +1072,7 @@ static void wallbox_task(void *arg) {
 
             vTaskDelay(ticks(5)); /* >= 3.5 characters at 9600/8E1; automatic transceiver turnaround. */
 
-            bool sent=uart_write_bytes(WALLBOX_UART,response,len)==len && uart_wait_tx_done(WALLBOX_UART,ticks(400))==ESP_OK;
+            bool sent=rs485_write(WALLBOX_UART,response,len,400);
 
             LOCK(); if(sent) {
 
@@ -1070,7 +1112,7 @@ static void nullable(cJSON *o,const char *key,double value,bool valid) {
 
 static bool read_house_serial(float currents_out[3],float *watts,bool *power_valid) {
     *power_valid=false;
-    if(!house_bus_ready) return false;
+    if(!house_bus_ready && !rs485_tcp(HOUSE_UART))return false;
     if(!strcmp(settings.house_meter_type,"xemex")) {
         bool ok=read_xemex_port(HOUSE_UART,settings.house_address,settings.house_meter_baud,currents_out);
         return ok && reconstruct_currents(currents_out,settings.house_xemex_coils);
@@ -1106,6 +1148,7 @@ static esp_err_t http_body_event(esp_http_client_event_t *event) {
 }
 
 #include "meter_network.inc"
+#include "rs485_transport.inc"
 
 #include "huawei_network.inc"
 
@@ -1164,9 +1207,12 @@ static void house_meter_task(void *arg) {
             }
         } else if(network_house_meter() && strcmp(settings.house_meter_type,"huawei") && (settings.zero_feed_enabled || settings.grid_guard_enabled)) {
             float watts,values[3]={0};bool current_valid=false;
+            LOCK();uint32_t revision=house_meter_revision;UNLOCK();
             if(read_house_meter(values,&watts,&current_valid)) {
                 network_failures=0;
-                int64_t now=now_ms(); LOCK(); house_power_w=watts; house_power_at=now;
+                int64_t now=now_ms(); LOCK();
+                if(revision!=house_meter_revision){UNLOCK();continue;}
+                house_power_w=watts; house_power_at=now;
                 if(current_valid){memcpy(house_a,values,sizeof(values));house_current_at=now;}
                 if(settings.zero_feed_enabled && fresh(now,actual_at,EMS_METER_TTL)) { settings.pv_surplus_a=pv_available_current_locked(now,watts); pv_at=now; }
                 UNLOCK();
@@ -1200,13 +1246,27 @@ static cJSON *status_json(bool include_token) {
     control_report(&settings,actual_a,target_locked(now),house_power_w,house_current_ok,reported);
     grid_guard_report_locked(now,reported);
 
+    cJSON_AddBoolToObject(o,"terms_accepted",terms_accepted);
+    cJSON_AddStringToObject(o,"terms_revision",TERMS_REVISION);
+    cJSON_AddBoolToObject(o,"evcc_test_enabled",evcc_control.configured);
+    cJSON_AddBoolToObject(o,"evcc_local_stop",evcc_control.inhibited);
+    cJSON_AddBoolToObject(o,"evcc_lease_expired",evcc_control.expired);
+    cJSON_AddBoolToObject(o,"evcc_status_known",evcc_shell_fresh(&evcc_shell,evcc_shell_at,now));
+    cJSON_AddStringToObject(o,"evcc_statuscar",evcc_shell.raw);
+    cJSON_AddStringToObject(o,"release_channel","stable");
     cJSON_AddStringToObject(o,"version",VERSION); cJSON_AddStringToObject(o,"build_id",EMS_BUILD_ID);
     cJSON_AddNumberToObject(o,"rs485_modules",2);
-    cJSON_AddStringToObject(o,"hardware","ESP32-S3 N16R8");
+    cJSON_AddStringToObject(o,"hardware",EMS_HARDWARE_NAME);
+    cJSON_AddStringToObject(o,"hardware_id",EMS_HARDWARE_ID);
+    cJSON_AddNumberToObject(o,"default_shell_tx_pin",EMS_DEFAULT_SHELL_TX_PIN);
+    cJSON_AddNumberToObject(o,"default_shell_rx_pin",EMS_DEFAULT_SHELL_RX_PIN);
+    cJSON_AddNumberToObject(o,"default_meter_tx_pin",EMS_DEFAULT_METER_TX_PIN);
+    cJSON_AddNumberToObject(o,"default_meter_rx_pin",EMS_DEFAULT_METER_RX_PIN);
+    cJSON_AddNumberToObject(o,"external_mode_input_pin",EMS_DEFAULT_MODE_INPUT_PIN);
     const esp_app_desc_t *app_description=esp_app_get_description();char app_hash[65];
     for(unsigned i=0;i<32;i++)snprintf(app_hash+i*2,3,"%02x",app_description->app_elf_sha256[i]);
     cJSON_AddStringToObject(o,"app_elf_sha256",app_hash);
-    cJSON_AddNumberToObject(o,"ota_max_bytes",0x200000);
+    cJSON_AddNumberToObject(o,"ota_max_bytes",EMS_OTA_PARTITION_BYTES);
     cJSON_AddBoolToObject(o,"diagnostic_storage_ok",fault_storage_ok);
     cJSON *ages=cJSON_AddObjectToObject(o,"measurement_age_s");
     nullable(ages,"wallbox",actual_at?(now-actual_at)/1000:0,actual_at>0);
@@ -1238,7 +1298,7 @@ static cJSON *status_json(bool include_token) {
     cJSON_AddBoolToObject(o,"pv_display_enabled",settings.pv_display_enabled);
     cJSON_AddBoolToObject(o,"relay_board_enabled",settings.relay_board_enabled);
     if(settings.relay_board_enabled) {
-        cJSON_AddBoolToObject(o,"relay1_on",relay_on[0]);cJSON_AddBoolToObject(o,"relay2_on",relay_on[1]);
+        cJSON_AddBoolToObject(o,"relay1_on",relay_on[0]);
     }
     cJSON_AddNumberToObject(o,"power_per_amp_kw",settings.charge_phases*settings.nominal_v*settings.power_factor/1000);
     cJSON_AddNumberToObject(o,"single_power_per_amp_kw",settings.nominal_v*settings.power_factor/1000);
@@ -1604,10 +1664,19 @@ static void mqtt_state(void) {
 }
 
 static bool apply_control(cJSON *o) {
+    if(!terms_accepted)return false;
 
     if(!cJSON_IsObject(o) || !o->child) return false;
 
-    LOCK(); settings_t next=settings; bool valid=true,pv=false,next_battery_use=battery_use,next_battery_start_use=battery_start_use,restart=false;
+    LOCK();
+    if(evcc_configuring){UNLOCK();return false;}
+    if(evcc_control.configured) {
+        char *body=cJSON_PrintUnformatted(o);
+        bool stop=evcc_emergency_stop_json(body);free(body);
+        if(!stop){UNLOCK();return false;}
+        evcc_local_stop(&evcc_control);
+    }
+    settings_t next=settings; bool valid=true,pv=false,next_battery_use=battery_use,next_battery_start_use=battery_start_use,restart=false;
     bool manual_phases_explicit=false,manual_mode_requested=false;
     int64_t change_at=now_ms();float previous_target=target_locked(change_at);control_mode_t previous_mode=settings.mode;
     bool transition=false;
@@ -1921,6 +1990,10 @@ static bool authorized(httpd_req_t *req) {
 
     if(reboot) { httpd_resp_set_status(req,"503 Service Unavailable"); httpd_resp_sendstr(req,"Neustart laeuft."); return false; }
 
+    LOCK();bool agreed=terms_accepted;UNLOCK();
+    if(req->method==HTTP_POST && !agreed && strcmp(req->uri,"/api/terms")){
+        httpd_resp_send_err(req,HTTPD_403_FORBIDDEN,"Nutzungsbedingungen zuerst bestaetigen.");return false;
+    }
     return true;
 
 }
@@ -1981,6 +2054,8 @@ typedef struct { const char *name; size_t offset,size; char type; } field_t;
 
 static const field_t fields[]={
 
+    FIELD(shell_rs485_interface,'u'),FIELD(meter_rs485_interface,'u'),FIELD(house_rs485_interface,'u'),
+    FIELD(shell_rs485_host,'s'),FIELD(meter_rs485_host,'s'),FIELD(house_rs485_host,'s'),FIELD(evcc_feature_enabled,'b'),
     FIELD(wifi_ssid,'s'),FIELD(wifi_password,'p'),FIELD(mqtt_uri,'s'),FIELD(mqtt_username,'s'),FIELD(mqtt_password,'p'),FIELD(mqtt_prefix,'s'),
 
     FIELD(grid_limit_a,'f'),FIELD(max_charge_a,'f'),FIELD(shell_limits_auto,'b'),FIELD(shell_setup_host,'s'),FIELD(xemex_address,'u'),FIELD(wallbox_tx_pin,'i'),FIELD(wallbox_rx_pin,'i'),
@@ -1993,7 +2068,7 @@ static const field_t fields[]={
     FIELD(evu_limit_a,'f'),FIELD(grid_guard_enabled,'b'),
     FIELD(house_address,'u'),FIELD(house_meter_baud,'i'),FIELD(house_meter_format,'u'),
     FIELD(relay_board_enabled,'b'),FIELD(relay_active_low,'b'),
-    FIELD(relay1_mode,'u'),FIELD(relay2_mode,'u'),
+    FIELD(relay1_mode,'u'),
     FIELD(mqtt_enabled,'b'),FIELD(homeassistant_enabled,'b'),FIELD(pv_display_enabled,'b'),FIELD(mqtt_input_source,'u'),
     FIELD(wallbox_meter_host,'s'),FIELD(charge_plan_enabled,'b'),FIELD(huawei_enabled,'b'),FIELD(huawei_host,'s'),FIELD(huawei_unit_id,'u'),FIELD(huawei_battery,'b'),FIELD(huawei_pv,'b'),FIELD(opendtu_prefix,'s'),FIELD(opendtu_pv_topic,'s'),FIELD(opendtu_pv_valid_topic,'s'),FIELD(opendtu_current_positive_discharge,'b')};
 
@@ -2026,7 +2101,7 @@ static cJSON *config_json(bool secrets) {
 }
 
 static esp_err_t config_apply(httpd_req_t *req,cJSON *o,bool restore) {
-    LOCK();bool maintenance=ota_in_progress||restarting;UNLOCK();
+    LOCK();bool maintenance=ota_in_progress||restarting||evcc_configuring||(evcc_control.configured&&evcc_control.enabled);UNLOCK();
     if(maintenance){cJSON_Delete(o);httpd_resp_set_status(req,"409 Conflict");return httpd_resp_sendstr(req,"Sicherung oder Update laeuft. Danach erneut versuchen.");}
 
 
@@ -2097,7 +2172,10 @@ static esp_err_t config_apply(httpd_req_t *req,cJSON *o,bool restore) {
 
     /* A different physical meter invalidates the previous commissioning check. */
 
-    bool meter_changed=strcmp(next.wallbox_meter_type,saved_settings.wallbox_meter_type) ||
+    bool meter_changed=next.shell_rs485_interface!=saved_settings.shell_rs485_interface ||
+        next.meter_rs485_interface!=saved_settings.meter_rs485_interface ||
+        strcmp(next.shell_rs485_host,saved_settings.shell_rs485_host) ||
+        strcmp(next.meter_rs485_host,saved_settings.meter_rs485_host) || strcmp(next.wallbox_meter_type,saved_settings.wallbox_meter_type) ||
         strcmp(next.wallbox_meter_host,saved_settings.wallbox_meter_host) ||
         next.xemex_coils!=saved_settings.xemex_coils || next.meter_baud!=saved_settings.meter_baud ||
         next.meter_format!=saved_settings.meter_format || next.xemex_address!=saved_settings.xemex_address ||
@@ -2162,6 +2240,14 @@ static esp_err_t config_apply(httpd_req_t *req,cJSON *o,bool restore) {
         settings.pv_house_priority_w!=next.pv_house_priority_w || settings.pv_car_priority_w!=next.pv_car_priority_w;
     bool previous_vehicle_soc=settings.vehicle_soc_enabled;
     bool previous_homeassistant=settings.homeassistant_enabled;
+    bool pv_source_changed=settings.zero_feed_enabled!=next.zero_feed_enabled || settings.zero_reserve_w!=next.zero_reserve_w;
+    bool huawei_connection_changed=settings.huawei_enabled!=next.huawei_enabled ||
+        settings.huawei_unit_id!=next.huawei_unit_id || strcmp(settings.huawei_host,next.huawei_host);
+    bool huawei_battery_changed=huawei_connection_changed || settings.huawei_battery!=next.huawei_battery;
+    bool huawei_pv_changed=huawei_connection_changed || settings.huawei_pv!=next.huawei_pv;
+    bool shell_source_changed=settings.shell_limits_auto!=next.shell_limits_auto || strcmp(settings.shell_setup_host,next.shell_setup_host);
+    bool manual_limits_changed=saved_settings.max_charge_a!=next.max_charge_a || saved_settings.grid_limit_a!=next.grid_limit_a;
+    bool house_network_changed=strcmp(settings.house_meter_host,next.house_meter_host) || strcmp(settings.house_power_path,next.house_power_path);
     if(next.price_kwh!=settings.price_kwh || next.solar_price_kwh!=settings.solar_price_kwh) {
         int64_t epoch,midnight,at=now_ms();uint32_t date=calendar(&epoch,&midnight);
         /* Close the preceding interval at its previous price, then apply the
@@ -2172,6 +2258,19 @@ static esp_err_t config_apply(httpd_req_t *req,cJSON *o,bool restore) {
         sessions.checkpoint=true;
     }
     bool applied=settings_apply_live(&settings,&saved_settings,&next);
+    if(applied) {
+        if(meter_changed){wallbox_meter_revision++;meter_at=actual_at=power_at=0;}
+        if(house_network_changed){house_meter_revision++;house_power_at=house_current_at=pv_at=0;}
+        if(manual_limits_changed){memset(&manual_filter,0,sizeof(manual_filter));memset(&current_calibration,0,sizeof(current_calibration));}
+        if(shell_source_changed){shell_active_host[0]=0;shell_limits_at=0;evcc_poll_generation++;}
+        /* Measurements belong to a source. A new source must supply its own
+           fresh reading before it participates in PV/battery regulation. */
+        if(huawei_battery_changed)battery_soc_at=battery_charge_at=battery_discharge_at=0;
+        if(huawei_pv_changed)pv_generation_at=0;
+        if(huawei_connection_changed && !strcmp(settings.house_meter_type,"huawei"))house_power_at=house_current_at=pv_at=0;
+        if(!settings.zero_feed_enabled && settings.mode==MODE_PV){settings.enabled=false;settings.mode=MODE_OFF;}
+    }
+    if(!next.evcc_feature_enabled && evcc_control.configured){evcc_configure(&evcc_control,false);settings.enabled=false;settings.mode=MODE_OFF;}
     /* Prices take effect even when another changed field needs a restart. */
     settings.price_kwh=next.price_kwh;settings.solar_price_kwh=next.solar_price_kwh;
     if(meter_changed){memset(&current_calibration,0,sizeof(current_calibration));calibration_dirty=false;}
@@ -2188,7 +2287,7 @@ static esp_err_t config_apply(httpd_req_t *req,cJSON *o,bool restore) {
         battery_use=false; battery_start_use=false; memset(&battery_buffer,0,sizeof(battery_buffer));
     }
     if(applied && previous_vehicle_soc && !settings.vehicle_soc_enabled) car_soc_at=0;
-    if(applied && (allocation_changed || previous_reserve!=settings.battery_reserve_soc || previous_battery_protect!=settings.battery_protect ||
+    if(applied && (house_network_changed || pv_source_changed || huawei_battery_changed || allocation_changed || previous_reserve!=settings.battery_reserve_soc || previous_battery_protect!=settings.battery_protect ||
                    previous_cloud_limit!=settings.battery_cloud_limit_w || previous_assist_limit!=settings.battery_assist_limit_w) && settings.mode==MODE_PV) {
         int64_t now=now_ms();
         if(settings.zero_feed_enabled && fresh(now,house_power_at,EMS_HOUSE_TTL) &&
@@ -2213,6 +2312,7 @@ static esp_err_t config_apply(httpd_req_t *req,cJSON *o,bool restore) {
     cJSON_AddBoolToObject(result,"ok",true);
     cJSON_AddBoolToObject(result,"reboot_required",needs_reboot);
     cJSON_AddBoolToObject(result,"applied",applied);
+    cJSON_AddBoolToObject(result,"restart_needed",!applied||restore);
     return send_json(req,result);
 
 }
@@ -2545,6 +2645,10 @@ extern const uint8_t features_gz_start[] asm("_binary_features_js_gz_start"),fea
 extern const uint8_t health_start[] asm("_binary_health_js_start"),health_end[] asm("_binary_health_js_end");
 extern const uint8_t health_gz_start[] asm("_binary_health_js_gz_start"),health_gz_end[] asm("_binary_health_js_gz_end");
 
+extern const uint8_t terms_js_start[] asm("_binary_terms_js_start"),terms_js_end[] asm("_binary_terms_js_end");
+extern const uint8_t terms_js_gz_start[] asm("_binary_terms_js_gz_start"),terms_js_gz_end[] asm("_binary_terms_js_gz_end");
+extern const uint8_t evcc_js_start[] asm("_binary_evcc_test_js_start"),evcc_js_end[] asm("_binary_evcc_test_js_end");
+extern const uint8_t evcc_js_gz_start[] asm("_binary_evcc_test_js_gz_start"),evcc_js_gz_end[] asm("_binary_evcc_test_js_gz_end");
 extern const uint8_t firmware_start[] asm("_binary_firmware_js_start"),firmware_end[] asm("_binary_firmware_js_end");
 extern const uint8_t firmware_gz_start[] asm("_binary_firmware_js_gz_start"),firmware_gz_end[] asm("_binary_firmware_js_gz_end");
 
@@ -2557,6 +2661,8 @@ static esp_err_t asset_send(httpd_req_t *req) {
     if(!strcmp(req->uri,"/dashboard.js")) start=js_start,end=js_end,type="application/javascript; charset=utf-8";
     if(!strcmp(req->uri,"/health.js")) start=health_start,end=health_end,type="application/javascript; charset=utf-8";
     if(!strcmp(req->uri,"/firmware.js")) start=firmware_start,end=firmware_end,type="application/javascript; charset=utf-8";
+    if(!strcmp(req->uri,"/terms.js")) start=terms_js_start,end=terms_js_end,type="application/javascript; charset=utf-8";
+    else if(!strcmp(req->uri,"/evcc-test.js")) start=evcc_js_start,end=evcc_js_end,type="application/javascript; charset=utf-8";
     if(!strcmp(req->uri,"/features.js")) start=features_start,end=features_end,type="application/javascript; charset=utf-8";
     if(!strcmp(req->uri,"/qrcode.js")) start=qr_start,end=qr_end,type="application/javascript; charset=utf-8";
     if(!strcmp(req->uri,"/guide.js")) start=guide_js_start,end=guide_js_end,type="application/javascript; charset=utf-8";
@@ -2578,6 +2684,8 @@ static esp_err_t asset_send(httpd_req_t *req) {
         else if(start==js_start) start=js_gz_start,end=js_gz_end;
         else if(start==health_start) start=health_gz_start,end=health_gz_end;
         else if(start==firmware_start) start=firmware_gz_start,end=firmware_gz_end;
+        else if(start==terms_js_start)start=terms_js_gz_start,end=terms_js_gz_end;
+        else if(start==evcc_js_start) start=evcc_js_gz_start,end=evcc_js_gz_end;
         else if(start==features_start) start=features_gz_start,end=features_gz_end;
         else if(start==qr_start) start=qr_gz_start,end=qr_gz_end;
         else if(start==guide_start) start=guide_gz_start,end=guide_gz_end;
@@ -2818,11 +2926,13 @@ static esp_err_t meter_preview_post(httpd_req_t *req) {
     }
     return meter_preview_get(req);
 }
+#include "terms_http.inc"
+#include "evcc_http.inc"
 #include "shell_limits.inc"
 
 static void start_web(void) {
 
-    httpd_config_t cfg=HTTPD_DEFAULT_CONFIG(); cfg.stack_size=8192; cfg.max_uri_handlers=48; cfg.max_open_sockets=10; cfg.lru_purge_enable=true; cfg.recv_wait_timeout=8; cfg.send_wait_timeout=8;
+    httpd_config_t cfg=HTTPD_DEFAULT_CONFIG(); cfg.stack_size=8192; cfg.max_uri_handlers=72; cfg.max_open_sockets=10; cfg.lru_purge_enable=true; cfg.recv_wait_timeout=8; cfg.send_wait_timeout=8;
     cfg.open_fn=web_socket_open;
     image_slots=xSemaphoreCreateCounting(2,2);
     if(!image_slots) abort();
@@ -2830,6 +2940,18 @@ static void start_web(void) {
     httpd_handle_t server; ESP_ERROR_CHECK(httpd_start(&server,&cfg));
 
     const httpd_uri_t routes[]={
+        {.uri="/api/terms",.method=HTTP_POST,.handler=terms_post},
+        {.uri="/api/evcc/local_release",.method=HTTP_POST,.handler=evcc_release_post},
+        {.uri="/api/evcc/config",.method=HTTP_GET,.handler=evcc_config_get},
+        {.uri="/api/evcc/config",.method=HTTP_POST,.handler=evcc_config_post},
+        {.uri="/api/evcc/status",.method=HTTP_GET,.handler=evcc_status_get},
+        {.uri="/api/evcc/enabled",.method=HTTP_GET,.handler=evcc_enabled_get},
+        {.uri="/api/evcc/current",.method=HTTP_POST,.handler=evcc_command_post},
+        {.uri="/api/evcc/enable",.method=HTTP_POST,.handler=evcc_command_post},
+        {.uri="/api/evcc/phases",.method=HTTP_POST,.handler=evcc_phases_post},
+        {.uri="/api/evcc/phases",.method=HTTP_GET,.handler=evcc_phases_get},
+        {.uri="/terms.js",.method=HTTP_GET,.handler=asset_handler},
+        {.uri="/evcc-test.js",.method=HTTP_GET,.handler=asset_handler},
         {.uri="/api/shell/scan",.method=HTTP_GET,.handler=shell_scan_get},
         {.uri="/api/shell/scan",.method=HTTP_POST,.handler=shell_scan_post},
 
@@ -2885,7 +3007,7 @@ static void wifi_event(void *arg,esp_event_base_t base,int32_t id,void *data) {
 
     }
 
-    if(base==WIFI_EVENT && id==WIFI_EVENT_STA_DISCONNECTED) { LOCK(); wifi_online=false; station_ip[0]=0; if(!wifi_lost_at) wifi_lost_at=now_ms(); house_power_at=0;if(network_house_meter())house_current_at=0;if(network_wallbox_meter())meter_at=actual_at=power_at=0; UNLOCK(); }
+    if(base==WIFI_EVENT && id==WIFI_EVENT_STA_DISCONNECTED) { LOCK(); wifi_online=false; station_ip[0]=0; if(!wifi_lost_at) wifi_lost_at=now_ms(); house_power_at=0;if(network_house_meter() || settings.house_rs485_interface)house_current_at=0;if(network_wallbox_meter() || settings.meter_rs485_interface)meter_at=actual_at=power_at=0; UNLOCK(); }
 
     if(base==IP_EVENT && id==IP_EVENT_STA_GOT_IP) {
 
@@ -3006,11 +3128,8 @@ static void relay_signals_locked(int64_t now) {
         fmaxf(actual_a[0],fmaxf(actual_a[1],actual_a[2]))>=1;
     bool fault=!fresh(now,actual_at,EMS_METER_TTL) || !wallbox_ready || !feedback_ready(now) ||
         charge_guard.latched || (settings.phase_switch_enabled && phase_state==PHASE_FAULT);
-    const uint8_t modes[]={settings.relay1_mode,settings.relay2_mode};
-    for(unsigned i=0;i<2;i++) {
-        if(i==0 && modes[i]==3 && settings.phase_switch_enabled) continue;
-        relay_set(i,modes[i]==1?charging:modes[i]==2?fault:false);
-    }
+    if(settings.relay1_mode==3 && settings.phase_switch_enabled) return;
+    relay_set(0,settings.relay1_mode==1?charging:settings.relay1_mode==2?fault:false);
 }
 
 static void status_task(void *arg) {
@@ -3023,6 +3142,12 @@ static void status_task(void *arg) {
         if(reset_count_pending && now>=reset_clear_at && !backup_in_progress) { UNLOCK(); reset_sequence_clear(); LOCK(); }
 
         opendtu_apply_locked(now);
+        if(evcc_tick(&evcc_control,now)) {
+            settings.enabled=false;settings.mode=MODE_OFF;event_locked("evcc_timeout");
+        }
+        if(evcc_control.configured && !evcc_control.enabled && settings.enabled) {
+            settings.enabled=false;settings.mode=MODE_OFF;
+        }
         contacts_step_locked(now);
         phase_step_locked(now);
         relay_signals_locked(now);
@@ -3053,7 +3178,7 @@ static void status_task(void *arg) {
         float maximum_kw=charge_plan_maximum_kw(&settings,house_currents_ready_locked(now),evu_contact.stable);
         plan_phase=charge_plan_step(&charge_plan,epoch/1000,date!=0,settings.enabled,
             energy.store.total_wh[0],maximum_kw);
-        if(charge_plan.active&&plan_phase==PLAN_GRID&&settings.mode!=MODE_MANUAL) {
+        if(!evcc_control.configured && charge_plan.active&&plan_phase==PLAN_GRID&&settings.mode!=MODE_MANUAL) {
             settings.mode=MODE_MANUAL;settings.manual_phases=settings.phase_switch_enabled?3:settings.fixed_charge_phases;settings.manual_current_a=settings.max_charge_a;
             pv_control_step(&pv_control,false,0,active_min_a(),settings.max_charge_a,now);
             event_locked("plan_grid");plan_dirty=true;plan_revision++;
@@ -3155,7 +3280,8 @@ void app_main(void) {
 
     }
 
-    load_settings(); load_energy(); load_plan(); load_diagnostics(); phase_setup(); contact_setup(); setenv("TZ","CET-1CEST,M3.5.0,M10.5.0/3",1); tzset();
+    load_settings(); terms_load(); evcc_load(); load_energy(); load_plan(); load_diagnostics();
+    if(evcc_control.configured&&charge_plan.active){charge_plan.active=false;plan_phase=PLAN_OFF;plan_dirty=true;plan_revision++;} phase_setup(); contact_setup(); setenv("TZ","CET-1CEST,M3.5.0,M10.5.0/3",1); tzset();
     LOCK();esp_reset_reason_t reset=esp_reset_reason();event_locked(reset==ESP_RST_TASK_WDT||reset==ESP_RST_INT_WDT||reset==ESP_RST_WDT?"boot_watchdog":reset==ESP_RST_BROWNOUT?"boot_brownout":"boot");UNLOCK();
 
     uint32_t random[4]; esp_fill_random(random,sizeof(random));
@@ -3174,10 +3300,10 @@ void app_main(void) {
 
 
 
-    wallbox_ready=init_uart(WALLBOX_UART,settings.wallbox_tx_pin,settings.wallbox_rx_pin,settings.wallbox_rts_pin,9600,1);
+    wallbox_ready=settings.shell_rs485_interface==1 || init_uart(WALLBOX_UART,settings.wallbox_tx_pin,settings.wallbox_rx_pin,settings.wallbox_rts_pin,9600,1);
 
-    meter_ready=network_wallbox_meter() || init_uart(XEMEX_UART,settings.xemex_tx_pin,settings.xemex_rx_pin,settings.xemex_rts_pin,settings.meter_baud,settings.meter_format);
-    house_bus_ready=!serial_house_meter() || init_uart(HOUSE_UART,settings.house_tx_pin,settings.house_rx_pin,settings.house_rts_pin,settings.house_meter_baud,settings.house_meter_format);
+    meter_ready=network_wallbox_meter() || settings.meter_rs485_interface==1 || init_uart(XEMEX_UART,settings.xemex_tx_pin,settings.xemex_rx_pin,settings.xemex_rts_pin,settings.meter_baud,settings.meter_format);
+    house_bus_ready=!serial_house_meter() || settings.house_rs485_interface==1 || init_uart(HOUSE_UART,settings.house_tx_pin,settings.house_rx_pin,settings.house_rts_pin,settings.house_meter_baud,settings.house_meter_format);
 
     if(wallbox_ready && xTaskCreate(wallbox_task,"wallbox",4096,NULL,10,NULL)!=pdPASS) wallbox_ready=false;
 
@@ -3185,7 +3311,7 @@ void app_main(void) {
 
 
     huawei_io=xSemaphoreCreateMutex();
-    if(settings.shell_limits_auto && xTaskCreate(shell_limits_task,"shell_limits",6144,NULL,4,NULL)!=pdPASS)ESP_LOGE(TAG,"Shell limits task failed");
+    if(xTaskCreate(shell_limits_task,"shell_limits",6144,NULL,4,NULL)!=pdPASS)ESP_LOGE(TAG,"Shell limits task failed");
     if(huawei_io)xTaskCreate(huawei_task,"huawei",4096,NULL,6,NULL);
     if(xTaskCreate(house_meter_task,"house_meter",6144,NULL,6,NULL)!=pdPASS) ESP_LOGE(TAG,"House meter task failed");
 

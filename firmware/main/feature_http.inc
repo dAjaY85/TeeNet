@@ -30,6 +30,8 @@ static esp_err_t restore_handler(httpd_req_t *req) {
 }
 #include "diagnostic_http.inc"
 static esp_err_t plan_handler(httpd_req_t *req) {
+    LOCK();bool evcc_owner=evcc_control.configured||evcc_configuring;UNLOCK();
+    if(evcc_owner){httpd_resp_set_status(req,"409 Conflict");return httpd_resp_sendstr(req,"Ladeplan im evcc-Modus nicht verfuegbar.");}
     if(!authorized(req))return ESP_OK;
     cJSON *o=read_json(req);if(!o)return ESP_OK;
     cJSON *active=cJSON_GetObjectItem(o,"active"),*kwh=cJSON_GetObjectItem(o,"kwh"),*deadline=cJSON_GetObjectItem(o,"deadline_epoch"),*resume=cJSON_GetObjectItem(o,"resume");

@@ -1,4 +1,5 @@
 #include "github_release.h"
+#include "hardware_profile.h"
 #include "cJSON.h"
 #include <string.h>
 #include <stdio.h>
@@ -22,7 +23,7 @@ bool github_release_parse(const char *json,size_t maximum,github_release_t *out)
     cJSON *tag=cJSON_GetObjectItem(root,"tag_name"),*draft=cJSON_GetObjectItem(root,"draft"),*pre=cJSON_GetObjectItem(root,"prerelease"),*assets=cJSON_GetObjectItem(root,"assets");
     if(!cJSON_IsString(tag)||tag->valuestring[0]!='v'||!version_valid(tag->valuestring+1)||
        !cJSON_IsFalse(draft)||!cJSON_IsFalse(pre)||!cJSON_IsArray(assets))goto finish;
-    char name[64],url[224];snprintf(name,sizeof(name),"TeeNet-%s-ota.bin",tag->valuestring+1);
+    char name[64],url[224];snprintf(name,sizeof(name),"TeeNet-%s%s-ota.bin",tag->valuestring+1,EMS_OTA_ASSET_SUFFIX);
     snprintf(url,sizeof(url),"https://github.com/stetastic/TeeNet/releases/download/%s/%s",tag->valuestring,name);
     cJSON *asset;
     cJSON_ArrayForEach(asset,assets){

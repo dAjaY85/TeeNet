@@ -14,6 +14,7 @@ const close=(a,b)=>assert(Math.abs(a-b)<.001,`${a} != ${b}`);
   for(const fault of ['missing','stale']){
     const api=demo(fault);
     await api('config',{huawei_enabled:true,house_meter_type:'huawei',grid_guard_enabled:true});
+    await api('reboot',{});
     await api('control',{mode:'manual',enabled:true,current_a:16});
     let s=await api('status');
     assert.equal(s.grid_guard_fallback,true);assert.equal(s.house_current_ok,false);
@@ -29,6 +30,7 @@ const close=(a,b)=>assert(Math.abs(a-b)<.001,`${a} != ${b}`);
   }
   const api=demo();
   await api('config',{huawei_enabled:true,house_meter_type:'huawei',grid_guard_enabled:true});
+  await api('reboot',{});
   await api('control',{enabled:true,mode:'manual',current_a:16});
   const s=await api('status');assert.equal(s.grid_guard_ok,true);
   assert.equal(s.grid_guard_fallback,false);close(s.target_current_a,16);

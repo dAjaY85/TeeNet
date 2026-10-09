@@ -6,7 +6,7 @@ let calls=0,visibility,scheduled=[],reloads=0,release,clock=0,statisticsHidden=t
 const document={hidden:false,addEventListener(name,callback){assert.equal(name,'visibilitychange');visibility=callback;}};
 const ctx=vm.createContext({document,window:{location:{reload(){reloads++;}}},state:null,token:'',online:true,
   initialized:true,busy:false,uploading:false,historyBusy:false,history:{},statusFailures:0,Math,Date:{now:()=>clock},
-  $(id){return {hidden:id==='statistics'?statisticsHidden:id==='settings'?settingsHidden:true};},render(){},showConnection(){},loadConfig(){},writes(){},loadHistory(){},loadSessions(){},drawCharts(){},
+  $(id){return {hidden:id==='statistics'?statisticsHidden:id==='settings'?settingsHidden:true};},updateUnsavedFunctions(){},render(){},showConnection(){},loadConfig(){},writes(){},loadHistory(){},loadSessions(){},drawCharts(){},
   setTimeout(callback,delay){scheduled.push({callback,delay});return scheduled.length;},clearTimeout(){},
   async api(){calls++;if(release)await new Promise(resolve=>release.resolve=resolve);return {build_id:'test-build',token:'token'};}
 });

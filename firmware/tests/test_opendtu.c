@@ -35,6 +35,6 @@ int main(void){
     assert(settings_valid(&cfg));settings_t reboot;
     assert(settings_decode(&cfg,sizeof(cfg),&reboot));assert(reboot.wallbox_tx_pin==6&&reboot.wallbox_rx_pin==5);
     cfg.basic_mode=true;assert(settings_decode(&cfg,sizeof(cfg),&reboot));assert(reboot.wallbox_tx_pin==6&&reboot.wallbox_rx_pin==5);
-    cfg.version=25;assert(settings_decode(&cfg,offsetof(settings_t,opendtu_prefix),&reboot));assert(reboot.version==26&&reboot.wallbox_tx_pin==6&&reboot.wallbox_rx_pin==5);
+    cfg.version=25;assert(settings_decode(&cfg,offsetof(settings_t,opendtu_prefix),&reboot));assert(reboot.version==EMS_SETTINGS_VERSION&&reboot.wallbox_tx_pin==6&&reboot.wallbox_rx_pin==5);
     puts("PASS: OpenDTU retained/stale/offline/invalid/sign handling; custom pins survive full and legacy reboot decoding");
 }
