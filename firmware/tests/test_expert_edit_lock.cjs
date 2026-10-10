@@ -5,10 +5,10 @@ const nodes={};const classes={toggle(){}};
 const el=id=>nodes[id]||=({disabled:false,textContent:'',classList:classes,querySelectorAll:()=>[],querySelector:()=>null,parentElement:{classList:classes}});
 const row=()=>({input:{disabled:false,value:30},reset:{disabled:false},node:{classList:classes},standard:30,saved:30,key:'PV_START'});
 const c={online:true,initialized:true,busy:false,uploading:false,configSaving:false,pin:'4040',working:false,
- state:{enabled:false,evcc_enabled:false,phase_switching:false,meter_ok:true,actual_a:[0,0,0]},rows:[row()],configRows:[row()],snapshot:null,el,
+ state:{enabled:false,evcc_enabled:false,phase_switching:false,meter_ok:true,actual_a:[0,0,0]},rows:[row()],snapshot:null,el,
  same:(a,b)=>a===b,value:r=>Number(r.input.value),changed:r=>Number(r.input.value)!==r.saved};
 vm.createContext(c);vm.runInContext(functions,c);
-function check(enabled){c.update();assert.equal(c.rows[0].input.disabled,!enabled);assert.equal(c.rows[0].reset.disabled,!enabled);assert.equal(c.configRows[0].input.disabled,!enabled);assert.equal(el('expert-defaults').disabled,!enabled);assert.equal(el('expert-save').disabled,true);}
+function check(enabled){c.update();assert.equal(c.rows[0].input.disabled,!enabled);assert.equal(c.rows[0].reset.disabled,!enabled);assert.equal(el('expert-defaults').disabled,!enabled);assert.equal(el('expert-save').disabled,true);}
 check(true);
 for(const [key,value] of [['enabled',true],['evcc_enabled',true],['phase_switching',true],['meter_ok',false],['actual_a',[0,2,0]],['actual_a',[null,0,0]],['actual_a',[NaN,0,0]],['actual_a',[0,0]],['actual_a',[0,0,-1]]]){
  const original=c.state[key];c.state[key]=value;check(false);c.state[key]=original;check(true);
