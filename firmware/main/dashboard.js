@@ -13,6 +13,20 @@ function setTheme(theme){
   drawCharts();
 }
 
+async function loadDeviceTheme(){
+  try{
+    const result=await api('/api/theme',undefined,4000);
+    if(result?.theme==='dark'||result?.theme==='light')setTheme(result.theme);
+  }catch(error){}
+}
+
+async function selectTheme(theme){
+  setTheme(theme);
+  try{await api('/api/theme',{theme},5000);}catch(error){
+    /* The browser preference remains useful while the controller is offline. */
+  }
+}
+
 const reasons={maintenance:'Wartung läuft · Ladung gesperrt.',reboot:'Gespeichert · Neustart erforderlich.',unsupported_meter:'Zählerprofil nicht unterstützt · Regelung gesperrt.',house_meter:'Hauszählerdaten fehlen · PV-Laden pausiert.',commissioning:'Einrichtung läuft · Regelung bis zur Prüfung an der Wallbox gesperrt.',uart:'RS485-Schnittstelle nicht bereit · Regelung gesperrt.',meter:'Wallbox-Messwert fehlt · Laden pausiert.',feedback:'Wallbox-Strommessung fehlt · Regelung gesperrt.',off:'Laderegelung ausgeschaltet.',pv_stale:'PV-Sollwert veraltet · Regelung gesperrt.',below_minimum:'Sollwert unter Mindeststrom · Stop-Anforderung aktiv.',none:'Regelung aktiv · frische Messwerte vorhanden.'};
 Object.assign(reasons,{evu_stop:'EVU-Kontakt aktiv · Ladung gestoppt.',grid_fallback:'Haus-Phasenwerte fehlen oder sind veraltet · Laden bis 8 kW.'});
 
@@ -625,41 +639,13 @@ $('factory-reset').addEventListener('click',()=>{if(!window.confirm('Alle WLAN-,
 $('reset-total').addEventListener('click',()=>{if(!window.confirm('Gesamtzähler auf 0 kWh setzen? Ladesitzungen und Tageswerte bleiben erhalten.'))return;action(async()=>{await api('/api/energy/reset',{});await pollStatus();toast('Gesamtzähler zurückgesetzt.');});});
 $('reset-sessions').addEventListener('click',()=>{if(!window.confirm('Alle gespeicherten Ladesitzungen und den CSV-Inhalt löschen?'))return;action(async()=>{await api('/api/sessions/reset',{});sessionOffset=0;await loadSessions();toast('Ladesitzungen gelöscht.');});});
 
-let selectedFirmware=null;
-$('ota-file-open').addEventListener('click',()=>{$('firmware-update').open=true;$('local-firmware-update').hidden=false;$('ota-file').click();});
-$('ota-file').addEventListener('change',async()=>{
-  const file=$('ota-file').files[0];selectedFirmware=null;$('firmware-selected').textContent='Prüfe Datei …';
-  try{const info=await TeeNetFirmware.inspect(file,state?.ota_max_bytes);if($('ota-file').files[0]!==file)return;selectedFirmware={file,info};$('firmware-selected').textContent=`TeeNet ${info.version}`;$('ota-status').textContent=info.integrity?'Datei geprüft. Bereit zur Installation.':'Dateityp passt. Vollständige Prüfung bei der Installation.';}
-  catch(error){if($('ota-file').files[0]!==file)return;$('firmware-selected').textContent='Datei nicht passend';$('ota-status').textContent=error.message;}
-});
-$('ota-upload').addEventListener('click',()=>action(async()=>{
-  const file=$('ota-file').files[0],info=await TeeNetFirmware.inspect(file,state?.ota_max_bytes);
-  if(!window.confirm(`TeeNet ${info.version} installieren? Die Ladung wird gestoppt.${$('ota-backup').checked?' Die Sicherung enthält Passwörter.':''}`))return;
-  uploading=true;$('ota-status').textContent='Ladung stoppen …';
-  try{
-    if(state.enabled)await api('/api/control',{enabled:false,mode:'off'});
-    const stoppedBy=Date.now()+60000;
-    while(true){await pollStatus();const a=state.actual_a||[];if(!state.enabled&&(!state.feedback_ok||a.length===3&&a.every(v=>Number.isFinite(v)&&v<1)))break;if(Date.now()>stoppedBy)throw Error('Ladestopp noch nicht bestätigt. Erst Ende der Ladung abwarten.');$('ota-status').textContent='Warte auf Ende der Ladung …';await new Promise(resolve=>setTimeout(resolve,1000));}
-    if($('ota-backup').checked)await downloadSystemBackup();
-    const oldBuild=state.build_id;
-    await new Promise((resolve,reject)=>{
-      const xhr=new XMLHttpRequest();xhr.open('POST','/api/ota');xhr.timeout=200000;xhr.setRequestHeader('Content-Type','application/octet-stream');xhr.setRequestHeader('X-EMS-Token',token);
-      xhr.upload.onprogress=e=>{if(e.lengthComputable)$('ota-status').textContent=`Übertragung: ${Math.round(e.loaded/e.total*100)} % · danach Dateiprüfung`;};
-      xhr.onload=()=>xhr.status===200?resolve():reject(new Error(xhr.responseText.slice(0,240)||'Update fehlgeschlagen'));
-      xhr.onerror=()=>reject(new Error('Verbindung beim Update unterbrochen. Bisherige Version und Verbindung prüfen.'));
-      xhr.ontimeout=()=>reject(new Error('Zeitüberschreitung beim Update.'));xhr.send(file);
-    });
-    TeeNetFirmware.remember(info,oldBuild);$('ota-status').textContent='Datei geprüft. Warte auf Neustart und Bestätigung …';initialized=false;showConnection(false);schedulePoll(2000);
-  }catch(error){$('ota-status').textContent=error.message;throw error;}finally{uploading=false;}
-}));
-
 async function stopForMaintenance(){
   if(state.enabled)await api('/api/control',{enabled:false,mode:'off'});
   const deadline=Date.now()+60000;
   while(true){await pollStatus();const a=state.actual_a||[];if(!state.enabled&&(!state.feedback_ok||a.length===3&&a.every(v=>Number.isFinite(v)&&v<1)))return;if(Date.now()>deadline)throw Error('Ladestopp noch nicht bestätigt.');await new Promise(resolve=>setTimeout(resolve,1000));}
 }
 async function downloadSystemBackup(){
-  $('ota-status').textContent='Systemsicherung wird gelesen …';
+  $('github-status').textContent='Systemsicherung wird gelesen …';
   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),300000);
   try{
     const response=await fetch('/api/backup/system',{headers:{'X-EMS-Token':token},cache:'no-store',signal:controller.signal});
@@ -667,11 +653,11 @@ async function downloadSystemBackup(){
     const expected=Number(response.headers.get('X-TeeNet-Backup-Bytes'));
     if(!Number.isInteger(expected)||expected<4*1024*1024||expected>32*1024*1024)throw Error('Keine vollständige Systemsicherung erhalten.');
     const reader=response.body.getReader(),chunks=[];let received=0;
-    while(true){const next=await reader.read();if(next.done)break;received+=next.value.length;if(received>expected){await reader.cancel();throw Error('Sicherungsgröße stimmt nicht.');}chunks.push(next.value);$('ota-status').textContent=`Systemsicherung: ${Math.round(received/expected*100)} %`;}
+    while(true){const next=await reader.read();if(next.done)break;received+=next.value.length;if(received>expected){await reader.cancel();throw Error('Sicherungsgröße stimmt nicht.');}chunks.push(next.value);$('github-status').textContent=`Systemsicherung: ${Math.round(received/expected*100)} %`;}
     if(received!==expected)throw Error('Sicherung unvollständig. Update nicht gestartet.');
     const zip=await TeeNetFirmware.backupZip(new Blob(chunks),state);
     const url=URL.createObjectURL(zip),link=document.createElement('a');link.href=url;link.download=`TeeNet-${state.version}-Systemsicherung-${new Date().toISOString().slice(0,10)}.zip`;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
-    $('ota-status').textContent='Sicherung heruntergeladen.';
+    $('github-status').textContent='Sicherung heruntergeladen.';
   }finally{clearTimeout(timeout);}
 }
 $('system-backup').addEventListener('click',()=>action(async()=>{
@@ -704,7 +690,7 @@ $('github-install').addEventListener('click',()=>action(async()=>{
   finally{uploading=false;}
 }));
 let statusPromise=null,loadedBuild='';
-async function pollStatus(){if(statusPromise)return statusPromise;statusPromise=(async()=>{const next=await api('/api/status',undefined,12000);if(loadedBuild&&next.build_id&&loadedBuild!==next.build_id){window.location.reload();return;}loadedBuild=next.build_id||loadedBuild;window.TeeNetHealth?.observe(next);state=next;settingsRebootPending=!!next.reboot_required;if(!settingsRebootPending)settingsRebootDeferred=false;updateUnsavedFunctions();token=state.token;statusFailures=0;showConnection(true);render();const updateMessage=window.TeeNetFirmware?.checkBoot(next);if(updateMessage){$('ota-status').textContent=updateMessage;toast(updateMessage);}})();try{return await statusPromise;}finally{statusPromise=null;}}
+async function pollStatus(){if(statusPromise)return statusPromise;statusPromise=(async()=>{const next=await api('/api/status',undefined,12000);if(loadedBuild&&next.build_id&&loadedBuild!==next.build_id){window.location.reload();return;}loadedBuild=next.build_id||loadedBuild;window.TeeNetHealth?.observe(next);state=next;settingsRebootPending=!!next.reboot_required;if(!settingsRebootPending)settingsRebootDeferred=false;updateUnsavedFunctions();token=state.token;statusFailures=0;showConnection(true);render();const updateMessage=window.TeeNetFirmware?.checkBoot(next);if(updateMessage){$('github-status').textContent=updateMessage;toast(updateMessage);}})();try{return await statusPromise;}finally{statusPromise=null;}}
 
 async function loadHistory(){if(historyBusy||!online||document.hidden)return;historyBusy=true;lastHistoryAt=Date.now();try{history=await api('/api/history',undefined,15000);drawCharts();}catch(error){}finally{historyBusy=false;}}
 
@@ -783,9 +769,10 @@ function showDonate(){
 $('donate-open').addEventListener('click',showDonate);
 $('donate-close').addEventListener('click',()=>$('donate-dialog').close());
 $('donate-dialog').addEventListener('click',e=>{if(e.target===$('donate-dialog'))$('donate-dialog').close();});
-$('theme-light').addEventListener('click',()=>setTheme('light'));
-$('theme-dark').addEventListener('click',()=>setTheme('dark'));
+$('theme-light').addEventListener('click',()=>selectTheme('light'));
+$('theme-dark').addEventListener('click',()=>selectTheme('dark'));
 setTheme(document.documentElement.dataset.theme);
+loadDeviceTheme();
 
 window.addEventListener('hashchange',showPage);
 

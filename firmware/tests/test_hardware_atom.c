@@ -7,6 +7,7 @@
 int main(void) {
     settings_t s,out;settings_defaults(&s);
     assert(!strcmp(EMS_HARDWARE_ID,"andreas-testboard"));
+    assert(!strcmp(EMS_OTA_ASSET_SUFFIX,"-andreas-testboard"));
     assert(s.wallbox_tx_pin==6 && s.wallbox_rx_pin==5);
     assert(s.xemex_tx_pin==1 && s.xemex_rx_pin==2);
     assert(s.external_mode_input_pin==1 && !s.external_mode_input_enabled);

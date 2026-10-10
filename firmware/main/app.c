@@ -480,11 +480,20 @@ static bool shelly_meter_type(const char *type) {
 static bool network_wallbox_meter(void) {
     return shelly_meter_type(settings.wallbox_meter_type) || !strcmp(settings.wallbox_meter_type,"em24_tcp");
 }
-static bool feedback_ready(int64_t now) {
-    return meter_ready && (!network_wallbox_meter() || fresh(now,actual_at,EMS_METER_TTL));
-}
 static bool network_house_meter(void) {
     return !strcmp(settings.house_meter_type,"tasmota") || !strcmp(settings.house_meter_type,"huawei") || !strcmp(settings.house_meter_type,"em24_tcp") || shelly_meter_type(settings.house_meter_type);
+}
+/* A missed network poll must not stop charging immediately. Direct RS485
+   measurements keep their tighter timeout; network meters get a short grace
+   period and still fail closed after a sustained outage. */
+static int64_t wallbox_meter_ttl(void) {
+    return network_wallbox_meter()?EMS_NETWORK_METER_TTL:EMS_METER_TTL;
+}
+static int64_t house_meter_ttl(void) {
+    return network_house_meter()?EMS_NETWORK_HOUSE_TTL:EMS_HOUSE_TTL;
+}
+static bool feedback_ready(int64_t now) {
+    return meter_ready && (!network_wallbox_meter() || fresh(now,actual_at,wallbox_meter_ttl()));
 }
 static bool serial_house_meter(void) { return !strcmp(settings.house_meter_type,"xemex") || sdm_profile(settings.house_meter_type)!=NULL; }
 static bool house_power_capable(void) { return network_house_meter() || sdm_profile(settings.house_meter_type)!=NULL; }
@@ -508,7 +517,7 @@ static uint8_t phase_observed(void) { return settings.phase_feedback_enabled?pha
 static bool phase_can_unlock_locked(int64_t now) {
     return settings.phase_switch_enabled && phase_fault_reset_allowed(phase_state==PHASE_FAULT,
         phase_gpio_ready,settings.phase_feedback_enabled,phase_gpio_ready?phase_observed():0,
-        relay_on[0],fresh(now,actual_at,EMS_METER_TTL),actual_a);
+        relay_on[0],fresh(now,actual_at,wallbox_meter_ttl()),actual_a);
 }
 
 static void relay_set(unsigned index,bool energized) {
@@ -590,7 +599,7 @@ static float allocation_grid_locked(int64_t now,float grid_w) {
 }
 
 static float phase_surplus_w_locked(int64_t now) {
-    if(!fresh(now,house_power_at,EMS_HOUSE_TTL) || !fresh(now,actual_at,EMS_METER_TTL)) return NAN;
+    if(!fresh(now,house_power_at,house_meter_ttl()) || !fresh(now,actual_at,wallbox_meter_ttl())) return NAN;
     float measured=estimated_charge_power(&settings,actual_a);
     if(!isfinite(measured)) return NAN;
     float reserve=0;
@@ -606,7 +615,7 @@ static void phase_step_locked(int64_t now) {
     if(phase_state==PHASE_FAULT) return;
     if(phase_state==PHASE_READY && !phase_feedback_matches(settings.phase_feedback_enabled,observed,settings.charge_phases)) { phase_state=PHASE_FAULT; return; }
     if(phase_state==PHASE_READY && settings.charge_phases==1 &&
-       fresh(now,actual_at,EMS_METER_TTL)) {
+       fresh(now,actual_at,wallbox_meter_ttl())) {
         float peak=fmaxf(actual_a[0],fmaxf(actual_a[1],actual_a[2]));
         if(peak>=1) {
             phase_no_load_since=0;
@@ -629,7 +638,7 @@ static void phase_step_locked(int64_t now) {
     }
     if(phase_state==PHASE_STOPPING) {
         if(evcc_control.configured && evcc_desired_phases(&evcc_control,settings.charge_phases)==3 && phase_goal==1)phase_goal=3;
-        bool fresh_meter=fresh(now,actual_at,EMS_METER_TTL);
+        bool fresh_meter=fresh(now,actual_at,wallbox_meter_ttl());
         float peak=fmaxf(actual_a[0],fmaxf(actual_a[1],actual_a[2]));
         bool zero=fresh_meter && peak<1 && last_sent_current_at>phase_stop_at && fresh(now,wallbox_at,10000);
         if(!zero) phase_zero_at=0;
@@ -686,7 +695,7 @@ static void phase_step_locked(int64_t now) {
 
 static bool pv_fresh_locked(int64_t now) {
 
-    return settings.zero_feed_enabled?(fresh(now,house_power_at,EMS_HOUSE_TTL) && fresh(now,pv_at,EMS_HOUSE_TTL)):fresh(now,pv_at,EMS_INPUT_TTL);
+    return settings.zero_feed_enabled?(fresh(now,house_power_at,house_meter_ttl()) && fresh(now,pv_at,house_meter_ttl())):fresh(now,pv_at,EMS_INPUT_TTL);
 
 }
 
@@ -723,9 +732,9 @@ static bool pv_permitted_locked(int64_t now) {
 
         !reboot_required && !restarting && !ota_in_progress && !unsupported_meter() &&
 
-        feedback_ready(now) && wallbox_ready && fresh(now,meter_at,EMS_METER_TTL) &&
+        feedback_ready(now) && wallbox_ready && fresh(now,meter_at,wallbox_meter_ttl()) &&
 
-        fresh(now,actual_at,EMS_METER_TTL) && fresh(now,wallbox_at,10000) && pv_fresh_locked(now);
+        fresh(now,actual_at,wallbox_meter_ttl()) && fresh(now,wallbox_at,10000) && pv_fresh_locked(now);
 
 }
 
@@ -760,9 +769,9 @@ static float unlatched_target_locked(int64_t now) {
 
     }
 
-    float target=control_target(&settings,feedback_ready(now) && wallbox_ready && fresh(now,meter_at,EMS_METER_TTL),
+    float target=control_target(&settings,feedback_ready(now) && wallbox_ready && fresh(now,meter_at,wallbox_meter_ttl()),
 
-        fresh(now,actual_at,EMS_METER_TTL),pv_fresh_locked(now));
+        fresh(now,actual_at,wallbox_meter_ttl()),pv_fresh_locked(now));
     if(evcc_control.configured && settings.charge_phases==1)target=fminf(target,3500/settings.nominal_v);
     if(settings.evu_input_enabled && evu_contact.stable)
         target=settings.evu_limit_a>0?fminf(target,settings.evu_limit_a):0;
@@ -780,7 +789,7 @@ static float target_locked(int64_t now) {
 
 static void mode_transition_locked(control_mode_t previous,float previous_target,int64_t now) {
     if(settings.mode==MODE_PV && previous==MODE_MANUAL && settings.enabled) {
-        if(settings.zero_feed_enabled && fresh(now,house_power_at,EMS_HOUSE_TTL) && fresh(now,actual_at,EMS_METER_TTL)) {
+        if(settings.zero_feed_enabled && fresh(now,house_power_at,house_meter_ttl()) && fresh(now,actual_at,wallbox_meter_ttl())) {
             settings.pv_surplus_a=pv_available_current_locked(now,house_power_w);pv_at=now;
         }
         if(pv_control_takeover(&pv_control,pv_permitted_locked(now) && !charge_guard_blocked(&charge_guard,now),
@@ -823,9 +832,9 @@ static const char *block_reason_locked(int64_t now) {
 
     if(!wallbox_ready) return "uart";
 
-    if(!feedback_ready(now) || !fresh(now,meter_at,EMS_METER_TTL)) return "meter";
+    if(!feedback_ready(now) || !fresh(now,meter_at,wallbox_meter_ttl())) return "meter";
 
-    if(!fresh(now,actual_at,EMS_METER_TTL)) return "feedback";
+    if(!fresh(now,actual_at,wallbox_meter_ttl())) return "feedback";
 
     if(settings.mode==MODE_PV && !pv_fresh_locked(now)) return settings.zero_feed_enabled?"house_meter":"pv_stale";
 
@@ -861,8 +870,8 @@ static void event_locked(const char *reason) {
     int64_t epoch,midnight,now=now_ms();bool clock_ok=calendar(&epoch,&midnight)!=0;
     ems_event_add(&event_log,reason,clock_ok?epoch/1000:0,now/1000,
         target_locked(now)*settings.charge_phases*settings.nominal_v/1000,
-        fresh(now,meter_at,EMS_METER_TTL)?estimated_charge_power(&settings,meter_a)/1000:NAN,
-        fresh(now,house_power_at,EMS_HOUSE_TTL)?house_power_w/1000:NAN,
+        fresh(now,meter_at,wallbox_meter_ttl())?estimated_charge_power(&settings,meter_a)/1000:NAN,
+        fresh(now,house_power_at,house_meter_ttl())?house_power_w/1000:NAN,
         fresh(now,battery_soc_at,EMS_INPUT_TTL)?battery_soc:NAN);
     if(diagnostic_store_add(&fault_log,ems_event_recent(&event_log,0))){fault_dirty=true;fault_revision++;}
 }
@@ -1057,7 +1066,7 @@ static void wallbox_task(void *arg) {
 
         if(req[0]!=settings.wallbox_address) wallbox_other_address++;
 
-        float currents[3]; bool house_ok=fresh(now_ms(),house_power_at,EMS_HOUSE_TTL);
+        float currents[3]; bool house_ok=fresh(now_ms(),house_power_at,house_meter_ttl());
 
         int64_t report_now=now_ms();float request=target_locked(report_now);
         control_report(&settings,actual_a,request,house_power_w,house_ok,currents);
@@ -1201,7 +1210,7 @@ static void house_meter_task(void *arg) {
                 int64_t now=now_ms(); LOCK(); memcpy(house_a,values,sizeof(values)); house_current_at=now;
                 if(power_valid) {
                     house_power_w=watts; house_power_at=now;
-                    if(settings.zero_feed_enabled && fresh(now,actual_at,EMS_METER_TTL)) { settings.pv_surplus_a=pv_available_current_locked(now,watts); pv_at=now; }
+                    if(settings.zero_feed_enabled && fresh(now,actual_at,wallbox_meter_ttl())) { settings.pv_surplus_a=pv_available_current_locked(now,watts); pv_at=now; }
                 }
                 UNLOCK();
             }
@@ -1214,7 +1223,7 @@ static void house_meter_task(void *arg) {
                 if(revision!=house_meter_revision){UNLOCK();continue;}
                 house_power_w=watts; house_power_at=now;
                 if(current_valid){memcpy(house_a,values,sizeof(values));house_current_at=now;}
-                if(settings.zero_feed_enabled && fresh(now,actual_at,EMS_METER_TTL)) { settings.pv_surplus_a=pv_available_current_locked(now,watts); pv_at=now; }
+                if(settings.zero_feed_enabled && fresh(now,actual_at,wallbox_meter_ttl())) { settings.pv_surplus_a=pv_available_current_locked(now,watts); pv_at=now; }
                 UNLOCK();
             } else {
                 if(network_failures<10)network_failures++;
@@ -1239,9 +1248,9 @@ static cJSON *status_json(bool include_token) {
 
     LOCK();
 
-    bool meter_ok=feedback_ready(now) && fresh(now,meter_at,EMS_METER_TTL),power_ok=fresh(now,power_at,(sdm_meter()||network_wallbox_meter())?EMS_METER_TTL:EMS_INPUT_TTL),actual_ok=feedback_ready(now) && fresh(now,actual_at,EMS_METER_TTL);
+    bool meter_ok=feedback_ready(now) && fresh(now,meter_at,wallbox_meter_ttl()),power_ok=fresh(now,power_at,(sdm_meter()||network_wallbox_meter())?wallbox_meter_ttl():EMS_INPUT_TTL),actual_ok=feedback_ready(now) && fresh(now,actual_at,wallbox_meter_ttl());
 
-    float reported[3]; bool house_current_ok=fresh(now,house_power_at,EMS_HOUSE_TTL);
+    float reported[3]; bool house_current_ok=fresh(now,house_power_at,house_meter_ttl());
 
     control_report(&settings,actual_a,target_locked(now),house_power_w,house_current_ok,reported);
     grid_guard_report_locked(now,reported);
@@ -1450,8 +1459,8 @@ static cJSON *status_json(bool include_token) {
     bool extrapolated=sdm_meter() && sdm_profile(settings.wallbox_meter_type)->phases==1;
     cJSON_AddBoolToObject(o,"power_is_extrapolated",extrapolated);
 
-    cJSON_AddBoolToObject(o,"house_meter_ok",house_power_capable()?fresh(now,house_power_at,EMS_HOUSE_TTL):fresh(now,house_current_at,EMS_HOUSE_TTL));
-    cJSON_AddBoolToObject(o,"house_power_ok",fresh(now,house_power_at,EMS_HOUSE_TTL));
+    cJSON_AddBoolToObject(o,"house_meter_ok",house_power_capable()?fresh(now,house_power_at,house_meter_ttl()):fresh(now,house_current_at,house_meter_ttl()));
+    cJSON_AddBoolToObject(o,"house_power_ok",fresh(now,house_power_at,house_meter_ttl()));
     bool house_phases_ok=house_currents_ready_locked(now);
     cJSON_AddBoolToObject(o,"house_current_ok",house_phases_ok);
     cJSON_AddBoolToObject(o,"grid_guard_enabled",settings.grid_guard_enabled);
@@ -1480,7 +1489,7 @@ static cJSON *status_json(bool include_token) {
 
     cJSON_AddStringToObject(o,"house_meter_type",settings.house_meter_type);
 
-    nullable(o,"house_power_w",house_power_w,fresh(now,house_power_at,EMS_HOUSE_TTL));
+    nullable(o,"house_power_w",house_power_w,fresh(now,house_power_at,house_meter_ttl()));
 
     cJSON_AddStringToObject(o,"mqtt_prefix",settings.mqtt_prefix);
 
@@ -1733,7 +1742,7 @@ static bool apply_control(cJSON *o) {
             battery_use=next_battery_use;
             battery_start_use=next_battery_start_use;
             if(!battery_use || battery_start_use) memset(&battery_buffer,0,sizeof(battery_buffer));
-            if(settings.zero_feed_enabled && fresh(now_ms(),house_power_at,EMS_HOUSE_TTL) && fresh(now_ms(),actual_at,EMS_METER_TTL)) {
+            if(settings.zero_feed_enabled && fresh(now_ms(),house_power_at,house_meter_ttl()) && fresh(now_ms(),actual_at,wallbox_meter_ttl())) {
                 int64_t now=now_ms();
                 settings.pv_surplus_a=pv_available_current_locked(now,house_power_w);
                 pv_at=now_ms(); next.pv_surplus_a=settings.pv_surplus_a;
@@ -2032,6 +2041,32 @@ static cJSON *read_json(httpd_req_t *req) {
 
 }
 
+static esp_err_t theme_get(httpd_req_t *req) {
+    uint8_t selected=0;
+    nvs_handle_t nvs;
+    if(nvs_open("wallbox_ems",NVS_READONLY,&nvs)==ESP_OK) {
+        if(nvs_get_u8(nvs,"ui_theme",&selected)!=ESP_OK) selected=0;
+        nvs_close(nvs);
+    }
+    cJSON *o=cJSON_CreateObject();if(!o)return httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Out of memory");
+    cJSON_AddStringToObject(o,"theme",selected==2?"dark":selected==1?"light":"unset");
+    return send_json(req,o);
+}
+
+static esp_err_t theme_post(httpd_req_t *req) {
+    if(!authorized(req)) return ESP_OK;
+    cJSON *o=read_json(req);if(!o)return ESP_OK;
+    cJSON *theme=cJSON_GetObjectItemCaseSensitive(o,"theme");
+    bool only=theme && theme==o->child && !theme->next && cJSON_IsString(theme);
+    uint8_t selected=only&&!strcmp(theme->valuestring,"dark")?2:only&&!strcmp(theme->valuestring,"light")?1:0;
+    cJSON_Delete(o);
+    if(!selected)return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Darstellung muss hell oder dunkel sein.");
+    nvs_handle_t nvs;esp_err_t err=nvs_open("wallbox_ems",NVS_READWRITE,&nvs);
+    if(err==ESP_OK){err=nvs_set_u8(nvs,"ui_theme",selected);if(err==ESP_OK)err=nvs_commit(nvs);nvs_close(nvs);}
+    if(err!=ESP_OK)return httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Darstellung konnte nicht gespeichert werden.");
+    return theme_get(req);
+}
+
 static esp_err_t status_handler(httpd_req_t *req) { return send_json(req,status_json(true)); }
 
 static esp_err_t control_handler(httpd_req_t *req) {
@@ -2189,13 +2224,13 @@ static esp_err_t config_apply(httpd_req_t *req,cJSON *o,bool restore) {
     LOCK(); bool phase_change_allowed=phase_option_change_allowed(
         saved_settings.phase_switch_enabled,next.phase_switch_enabled,
         settings.charge_phases,phase_state==PHASE_READY,
-        fresh(now_ms(),actual_at,EMS_METER_TTL),actual_a); UNLOCK();
+        fresh(now_ms(),actual_at,wallbox_meter_ttl()),actual_a); UNLOCK();
     LOCK();bool fixed_change_allowed=next.fixed_charge_phases==saved_settings.fixed_charge_phases ||
-        (!settings.enabled && fresh(now_ms(),actual_at,EMS_METER_TTL) &&
+        (!settings.enabled && fresh(now_ms(),actual_at,wallbox_meter_ttl()) &&
          actual_a[0]<1 && actual_a[1]<1 && actual_a[2]<1 && phase_state==PHASE_READY);UNLOCK();
     LOCK();bool feedback_change_allowed=(next.phase_feedback_enabled==saved_settings.phase_feedback_enabled &&
         next.phase_feedback_closed_is_single==saved_settings.phase_feedback_closed_is_single) ||
-        (!settings.enabled && fresh(now_ms(),actual_at,EMS_METER_TTL) &&
+        (!settings.enabled && fresh(now_ms(),actual_at,wallbox_meter_ttl()) &&
          actual_a[0]<1 && actual_a[1]<1 && actual_a[2]<1 && phase_state==PHASE_READY);UNLOCK();
     if(!feedback_change_allowed)return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,
         "Rueckmeldung nur bei gestoppter Ladung und frischem Messwert unter 1 A aendern.");
@@ -2253,7 +2288,7 @@ static esp_err_t config_apply(httpd_req_t *req,cJSON *o,bool restore) {
         /* Close the preceding interval at its previous price, then apply the
            new tariff from this exact boundary, including within one session. */
         sessions_step(&sessions,at,epoch,date,estimated_charge_power(&settings,meter_a),
-            meter_at?meter_at+EMS_METER_TTL:0,house_power_w,house_power_at?house_power_at+EMS_HOUSE_TTL:0,
+            meter_at?meter_at+wallbox_meter_ttl():0,house_power_w,house_power_at?house_power_at+house_meter_ttl():0,
             next.price_kwh,next.solar_price_kwh);
         sessions.checkpoint=true;
     }
@@ -2290,8 +2325,8 @@ static esp_err_t config_apply(httpd_req_t *req,cJSON *o,bool restore) {
     if(applied && (house_network_changed || pv_source_changed || huawei_battery_changed || allocation_changed || previous_reserve!=settings.battery_reserve_soc || previous_battery_protect!=settings.battery_protect ||
                    previous_cloud_limit!=settings.battery_cloud_limit_w || previous_assist_limit!=settings.battery_assist_limit_w) && settings.mode==MODE_PV) {
         int64_t now=now_ms();
-        if(settings.zero_feed_enabled && fresh(now,house_power_at,EMS_HOUSE_TTL) &&
-           fresh(now,actual_at,EMS_METER_TTL) && (!settings.battery_protect || battery_ready_locked(now))) {
+        if(settings.zero_feed_enabled && fresh(now,house_power_at,house_meter_ttl()) &&
+           fresh(now,actual_at,wallbox_meter_ttl()) && (!settings.battery_protect || battery_ready_locked(now))) {
             settings.pv_surplus_a=pv_available_current_locked(now,house_power_w);
             pv_at=now;
             /* Preference changes use the normal ramp and deficit grace period.
@@ -2966,6 +3001,8 @@ static void start_web(void) {
 
         {.uri="/api/status",.method=HTTP_GET,.handler=status_handler},
 
+        {.uri="/api/theme",.method=HTTP_GET,.handler=theme_get},{.uri="/api/theme",.method=HTTP_POST,.handler=theme_post},
+
         {.uri="/api/history",.method=HTTP_GET,.handler=history_handler},{.uri="/api/sessions",.method=HTTP_GET,.handler=sessions_handler},{.uri="/api/sessions/day",.method=HTTP_GET,.handler=session_day_handler},{.uri="/api/export.csv",.method=HTTP_GET,.handler=csv_handler},
 
         {.uri="/api/config",.method=HTTP_GET,.handler=config_get},{.uri="/api/config",.method=HTTP_POST,.handler=config_post},
@@ -3124,9 +3161,9 @@ static void maintain_wifi(int64_t now) {
 static void relay_signals_locked(int64_t now) {
     if(!settings.relay_board_enabled || !relay_ready) return;
     bool charging=settings.enabled && !restarting && !ota_in_progress && !reboot_required &&
-        fresh(now,actual_at,EMS_METER_TTL) && target_locked(now)>0 &&
+        fresh(now,actual_at,wallbox_meter_ttl()) && target_locked(now)>0 &&
         fmaxf(actual_a[0],fmaxf(actual_a[1],actual_a[2]))>=1;
-    bool fault=!fresh(now,actual_at,EMS_METER_TTL) || !wallbox_ready || !feedback_ready(now) ||
+    bool fault=!fresh(now,actual_at,wallbox_meter_ttl()) || !wallbox_ready || !feedback_ready(now) ||
         charge_guard.latched || (settings.phase_switch_enabled && phase_state==PHASE_FAULT);
     if(settings.relay1_mode==3 && settings.phase_switch_enabled) return;
     relay_set(0,settings.relay1_mode==1?charging:settings.relay1_mode==2?fault:false);
@@ -3157,7 +3194,7 @@ static void status_task(void *arg) {
            must be read-only views of this state. */
         float unguarded_target=unlatched_target_locked(now);
         charge_guard_step(&charge_guard,unguarded_target>0,
-            fresh(now,actual_at,EMS_METER_TTL),actual_a,active_min_a(),now);
+            fresh(now,actual_at,wallbox_meter_ttl()),actual_a,active_min_a(),now);
         bool learn=feedback_ready(now) && fresh(now,wallbox_at,5000) && fresh(now,last_sent_current_at,5000) &&
             !charge_guard_blocked(&charge_guard,now) && !settings.phase_switch_enabled &&
             !settings.grid_guard_enabled && !(settings.evu_input_enabled && evu_contact.stable) &&
@@ -3168,11 +3205,11 @@ static void status_task(void *arg) {
 
         double power[2]={estimated_charge_power(&settings,meter_a),wallbox_w};
 
-        int64_t expires[2]={meter_at?meter_at+EMS_METER_TTL:0,power_at?power_at+((sdm_meter()||network_wallbox_meter())?EMS_METER_TTL:EMS_INPUT_TTL):0};
+        int64_t expires[2]={meter_at?meter_at+wallbox_meter_ttl():0,power_at?power_at+((sdm_meter()||network_wallbox_meter())?wallbox_meter_ttl():EMS_INPUT_TTL):0};
 
         energy_step(&energy,now,epoch,date,midnight,power,expires);
         sessions_step(&sessions,now,epoch,date,power[0],expires[0],house_power_w,
-            house_power_at?house_power_at+EMS_HOUSE_TTL:0,settings.price_kwh,settings.solar_price_kwh);
+            house_power_at?house_power_at+house_meter_ttl():0,settings.price_kwh,settings.solar_price_kwh);
 
         plan_phase_t previous_plan=plan_phase;
         float maximum_kw=charge_plan_maximum_kw(&settings,house_currents_ready_locked(now),evu_contact.stable);
@@ -3190,8 +3227,8 @@ static void status_task(void *arg) {
         uint32_t previous_event_sequence=event_log.sequence;
         ems_event_observe(&event_log,block_reason_locked(now),date?epoch/1000:0,now/1000,
             target_locked(now)*settings.charge_phases*settings.nominal_v/1000,
-            fresh(now,meter_at,EMS_METER_TTL)?power[0]/1000:NAN,
-            fresh(now,house_power_at,EMS_HOUSE_TTL)?house_power_w/1000:NAN,
+            fresh(now,meter_at,wallbox_meter_ttl())?power[0]/1000:NAN,
+            fresh(now,house_power_at,house_meter_ttl())?house_power_w/1000:NAN,
             fresh(now,battery_soc_at,EMS_INPUT_TTL)?battery_soc:NAN);
 
         if(event_log.sequence!=previous_event_sequence&&diagnostic_store_add(&fault_log,ems_event_recent(&event_log,0))){fault_dirty=true;fault_revision++;}
@@ -3245,7 +3282,7 @@ static void status_task(void *arg) {
 
         if(now-console>=30000) {
 
-            LOCK(); ESP_LOGI(TAG,"v%s uptime=%lld heap=%lu meter=%d mqtt=%d block=%s",VERSION,now/1000,(unsigned long)esp_get_free_heap_size(),fresh(now,meter_at,EMS_METER_TTL),mqtt_online,block_reason_locked(now)); UNLOCK(); console=now;
+            LOCK(); ESP_LOGI(TAG,"v%s uptime=%lld heap=%lu meter=%d mqtt=%d block=%s",VERSION,now/1000,(unsigned long)esp_get_free_heap_size(),fresh(now,meter_at,wallbox_meter_ttl()),mqtt_online,block_reason_locked(now)); UNLOCK(); console=now;
 
         }
 

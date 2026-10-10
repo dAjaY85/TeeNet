@@ -1,4 +1,4 @@
-# TeeNet 1.15
+# TeeNet 1.16
 
 Lokale ESP32-S3-Steuerung für die **Shell Recharge Advanced 3.0**.
 
@@ -18,7 +18,7 @@ Einrichtung und Bedienung erfolgen im Browser. Die Online-Demo lässt sich ohne 
 
 ## Installation
 
-Neue Geräte über den [USB-Webinstaller](https://teennet-demo.stetastic.chatgpt.site/install.html) installieren; dabei werden vorhandene Daten gelöscht. Eingerichtete Geräte unter **System & Hilfe** per OTA-Datei oder direkt von GitHub aktualisieren. Dort lässt sich vorher eine vollständige Systemsicherung herunterladen. Firmware und Quellcode stehen bei den [Veröffentlichungen](https://github.com/stetastic/TeeNet/releases/latest).
+Neue Geräte über den [USB-Webinstaller](https://teennet-demo.stetastic.chatgpt.site/install.html) installieren; dabei werden vorhandene Daten gelöscht. Eingerichtete Geräte unter **System & Hilfe** direkt von GitHub aktualisieren. Dort lässt sich vorher eine vollständige Systemsicherung herunterladen. Firmware und Quellcode stehen bei den [Veröffentlichungen](https://github.com/stetastic/TeeNet/releases/latest).
 
 ## Hardware
 

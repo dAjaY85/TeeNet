@@ -1,9 +1,11 @@
-# TeeNet 1.15
+# TeeNet 1.16
 
-Quellcode für die Shell Recharge Advanced 3.0 mit zwei auswählbaren Hardwareprofilen:
+Quellcode für Shell Recharge Advanced 3.0 mit zwei Hardwareprofilen:
 
 - **ESP32-S3 N16R8:** 16 MB Flash, Shell TX17/RX18, Zähler TX4/RX5.
 - **Andreas Testboard · AtomS3 Lite:** 8 MB Flash, Shell TX6/RX5, Zähler TX1/RX2, Betriebsartkontakt optional auf GPIO1.
+
+Standard-Build: `5f39faad2d3b`.
 
 ## Bauen
 
@@ -11,15 +13,9 @@ ESP-IDF 5.3.2 installieren und die ESP-IDF-Konsole öffnen. Im Projektordner:
 
     powershell -ExecutionPolicy Bypass -File tools/build_profiles.ps1
 
-Das Skript erzeugt beide Varianten getrennt in `build` und `build-atoms3-lite`. Für nur ein Profil:
+Das Skript erzeugt beide Varianten getrennt in `build` und `build-atoms3-lite`.
 
-    powershell -ExecutionPolicy Bypass -File tools/build.ps1 -Target esp32s3_n16r8
-
-oder:
-
-    powershell -ExecutionPolicy Bypass -File tools/build.ps1 -Target atoms3_lite_8mb -BuildDirectory build-atoms3-lite
-
-Die OTA-Datei `build/wallbox_ems.bin` unter **System & Hilfe** am eingerichteten TeeNet auswählen. Ladung vorher stoppen.
+Am eingerichteten TeeNet unter **System & Hilfe** nach Updates suchen und die Installation dort starten. Ladung vorher stoppen.
 
 Erstinstallation über den [USB-Webinstaller](https://teennet-demo.stetastic.chatgpt.site/install.html) oder mit `idf.py -p PORT flash` (`PORT` ersetzen).
 

@@ -9,7 +9,7 @@
 #define EMS_DEFAULT_METER_TX_PIN 1
 #define EMS_DEFAULT_METER_RX_PIN 2
 #define EMS_DEFAULT_MODE_INPUT_PIN 1
-#define EMS_OTA_ASSET_SUFFIX "-atoms3-lite"
+#define EMS_OTA_ASSET_SUFFIX "-andreas-testboard"
 #define EMS_FLASH_SIZE_BYTES 0x800000u
 #define EMS_FLASH_SIZE_NIBBLE 0x30u
 #else
