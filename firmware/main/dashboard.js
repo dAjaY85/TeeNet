@@ -239,21 +239,6 @@ function render(){if(!state)return;const s=state,valid=online;
   $('house-battery-power').dataset.direction=batteryFlow;
   $('house-battery-label').textContent={charging:'Akku lädt',discharging:'Akku entlädt',idle:'Akku bereit',unknown:'Akkuleistung'}[batteryFlow];
   $('house-battery-value').textContent=`${format(batteryFlow==='unknown'?null:Math.max(0,Math.abs(charge-discharge))/1000,2)} kW`;
-  $('battery-distribution').hidden=batteryInactive;
-  const evPower=valid&&s.feedback_ok&&Number.isFinite(s.estimate_w)?Math.max(0,s.estimate_w):null;
-  const splitTotal=charge!==null&&evPower!==null?charge+evPower:0;
-  $('battery-priority-view').textContent=s.pv_allocation_enabled?(s.pv_allocation_ready?['Hausakku zuerst','Auto zuerst','Solarstrom anteilig aufteilen'][s.pv_priority]:'Ladepriorität wartet auf Akkudaten'):'PV-Überschuss fürs Fahrzeug';
-  $('allocation-house-label').textContent=discharge>50?'Hausakku entlädt':'Hausakku lädt';
-  $('allocation-house-power').textContent=`${format((discharge>50?discharge:charge)===null?null:(discharge>50?discharge:charge)/1000,1)} kW`;
-  $('allocation-car-power').textContent=`${format(evPower===null?null:evPower/1000,1)} kW`;
-  const shareKnown=splitTotal>50&&discharge!==null&&discharge<=50;
-  $('allocation-house-share').textContent=shareKnown?`${format(charge/splitTotal*100,0)} % der Ladeleistung`:'';
-  $('allocation-car-share').textContent=shareKnown?`${format(evPower/splitTotal*100,0)} % der Ladeleistung`:'';
-  const startKw=Number.isFinite(s.pv_start_threshold_a)?s.pv_start_threshold_a*powerFactor():null;
-  $('allocation-start-note').textContent=s.enabled&&s.mode==='pv'&&s.target_current_a===0?`PV-Start · ${s.charge_phases===1?'einphasig':'dreiphasig'} ab ${format(startKw,1)} kW${s.pv_wait_s>0?` · noch ${s.pv_wait_s} s`:''}`:'Gemessene Leistungsverteilung';
-
-
-
   const mqttSource=s.mqtt_input_source==='opendtu'?'OpenDTU':'Smart Home';
   const signal=Number.isFinite(s.wifi_rssi_dbm)?` · ${s.wifi_rssi_dbm} dBm`:'';
   const diagnostics=[diagnostic('Hardware',s.hardware||'ESP32-S3'),diagnostic('Heimnetz',s.wifi_ok?`${s.station_ip}${signal}`:'Nicht verbunden'),diagnostic('Uhrzeit',s.clock_ok?'Synchronisiert':'Warte auf Internetzeit'),diagnostic('MQTT',s.mqtt_ok?`Verbunden · ${mqttSource}`:`Nicht verbunden · ${mqttSource}`),diagnostic('Wallbox',s.wallbox_ok?'Kommunikation OK':'Keine aktuellen Abfragen'),diagnostic('Wallbox-Zähler',s.feedback_ok?'Daten aktuell':'Daten fehlen'),diagnostic('Hauszähler',s.house_meter_ok?'Daten aktuell':s.zero_feed_enabled||s.grid_guard_enabled?'Daten fehlen':'Nicht benötigt'),diagnostic('Speicherung',s.storage_ok?'Bereit':'Fehler'),...(s.huawei_enabled?[diagnostic('Huawei',s.huawei_ok?s.huawei_model:'Keine aktuellen Daten')]:[])];
