@@ -5,6 +5,11 @@
 #include <string.h>
 int main(void){
  expert_values_t defaults,next,decoded;expert_defaults(&defaults);assert(expert_valid(&defaults));
+ assert(!expert_modified(NULL));assert(!expert_modified(&defaults));
+ next=defaults;next.values[EP_PV_START]=31;assert(expert_modified(&next));
+ assert(expert_decode(&next,sizeof(next),&decoded));assert(expert_modified(&decoded));
+ next=defaults;next.values[EP_PV_DEFICIT]=0.6f;assert(expert_modified(&next));
+ expert_defaults(&next);assert(!expert_modified(&next));
  assert(expert_pin_valid("4040"));assert(!expert_pin_valid("404"));assert(!expert_pin_valid(NULL));
  assert(!expert_pin_valid("4040x"));assert(!expert_pin_valid("0000"));
  next=defaults;next.values[EP_PV_START]=45;assert(expert_activate(&next));

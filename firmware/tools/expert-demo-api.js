@@ -39,6 +39,7 @@
   const response=await previous(input,options);
   if(url.origin===location.origin && url.pathname==='/api/status'&&response.ok){
    const state=await response.clone().json(),schema=await schemaPromise;
+   state.expert_parameters_modified=schema.parameters.some(p=>Math.abs((saved[p.id]??p.default)-p.default)>1e-4);
    if(schema.parameters.some(p=>(saved[p.id]??p.default)!==(active[p.id]??p.default)))state.reboot_required=true;
    if(active.MIN_CURRENT)state.min_charge_a=active.MIN_CURRENT;
    return json(state);

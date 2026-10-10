@@ -804,9 +804,10 @@ showPage();writes();poll();
 
 /* Password stays in this page's memory; no cookies or local storage. */
 (() => {
- let pin='',snapshot=null,working=false,timer,rows=[];
+ let pin='',snapshot=null,working=false,timer,rows=[],savedModified=false,lastMarkerState=null;
  const el=id=>document.getElementById(id),same=(a,b)=>typeof a==='number'&&typeof b==='number'?Math.abs(a-b)<.0001:a===b;
  const message=(text,error=false)=>{el('expert-message').textContent=text;el('expert-message').classList.toggle('expert-message-error',error);};
+ function parameterMeta(raw){const meta={...raw};for(const key of ['min','max','step','default','value','active'])if(typeof meta[key]==='number')meta[key]=Number(meta[key].toFixed(6));return meta;}
  function readable(v,input){if(input?.tagName==='SELECT')return Array.from(input.options).find(o=>o.value===String(v))?.textContent||String(v);if(typeof v==='boolean')return v?'Ein':'Aus';return v===''?'Nicht eingetragen':typeof v==='number'?String(Number(v.toFixed(4))):String(v);}
  function value(row){return row.secret?row.input.value:row.boolean?row.input.checked:row.booleanSelect?row.input.value==='true':row.numeric?Number(row.input.value)*row.scale:row.input.value;}
  function changed(row){return row.secret?!!row.input.value:!same(value(row),row.saved);}
@@ -843,8 +844,9 @@ showPage();writes();poll();
  }
  function updateGroupMarkers(){
   const panel=el('expert-settings');
+  if(state!==lastMarkerState){lastMarkerState=state;if(typeof state?.expert_parameters_modified==='boolean')savedModified=state.expert_parameters_modified;}
   for(const group of [el('maintenance'),panel,...panel.querySelectorAll('.expert-section')]){
-   const modified=!!group.querySelector('.expert-row.is-modified');
+   const modified=!pin&&(group===panel||group===el('maintenance'))?savedModified:!!group.querySelector('.expert-row.is-modified');
    group.classList.toggle('has-modified-parameters',modified);
    const summary=group.querySelector(':scope > summary');
    if(summary){summary.classList.toggle('parameter-summary-modified',modified);if(modified)summary.setAttribute('title','Enthält Einstellungen, die vom Standard abweichen.');else summary.removeAttribute('title');}
@@ -874,8 +876,9 @@ showPage();writes();poll();
  }
  function render(data){
   snapshot=data;rows=[];el('expert-parameters').replaceChildren();
+  savedModified=data.parameters.some(meta=>!same(meta.value,meta.default));
   const groups=new Map();
-  for(const meta of data.parameters){let group=groups.get(meta.group);if(!group){group=document.createElement('details');group.className='expert-section';const summary=document.createElement('summary');summary.textContent=meta.group;group.append(summary);groups.set(meta.group,group);el('expert-parameters').append(group);}const input=document.createElement('input');input.type='number';input.min=meta.min;input.max=meta.max;input.step=meta.step;input.value=meta.value;
+  for(const raw of data.parameters){const meta=parameterMeta(raw);let group=groups.get(meta.group);if(!group){group=document.createElement('details');group.className='expert-section';const summary=document.createElement('summary');summary.textContent=meta.group;group.append(summary);groups.set(meta.group,group);el('expert-parameters').append(group);}const input=document.createElement('input');input.type='number';input.min=meta.min;input.max=meta.max;input.step=meta.step;input.value=meta.value;
    const row=makeRow({key:meta.id,label:meta.label,help:meta.help,unit:meta.unit,standard:meta.default,saved:meta.value,min:meta.min,max:meta.max,numeric:true,scale:1},input);rows.push(row);group.append(row.node);
    if(!same(meta.active,meta.value)){const note=document.createElement('small');note.textContent=`Bis zum Neustart aktiv: ${meta.active} ${meta.unit}`;row.node.querySelector('label').append(note);}
   }

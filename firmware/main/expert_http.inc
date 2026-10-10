@@ -1,5 +1,4 @@
 /* Expert values are immutable during operation and activated only at boot. */
-static expert_values_t expert_saved;
 static int64_t expert_wrong_until;
 static void expert_load(void) {
     expert_defaults(&expert_saved);

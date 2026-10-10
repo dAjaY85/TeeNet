@@ -8,6 +8,11 @@ const expert_meta_t expert_meta[EP_COUNT]={
 #undef P
 static expert_values_t active;
 void expert_defaults(expert_values_t *v){ v->version=1;for(unsigned i=0;i<EP_COUNT;i++)v->values[i]=expert_meta[i].standard; }
+bool expert_modified(const expert_values_t *v){
+ if(!v||v->version!=1)return false;
+ for(unsigned i=0;i<EP_COUNT;i++)if(fabsf(v->values[i]-expert_meta[i].standard)>.00001f)return true;
+ return false;
+}
 bool expert_valid(const expert_values_t *v){
  if(!v||v->version!=1)return false;
  for(unsigned i=0;i<EP_COUNT;i++){

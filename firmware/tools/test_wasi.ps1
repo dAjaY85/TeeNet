@@ -75,3 +75,5 @@ node tests/test_expert_edit_lock.cjs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 node tests/test_expert_curve.cjs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+node tests/test_expert_precision_markers.cjs
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

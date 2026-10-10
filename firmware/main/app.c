@@ -168,6 +168,7 @@ static bool house_bus_ready,relay_ready,relay_on[1];
 
 static bool config_storage_ok,stats_storage_ok,storage_error,reboot_required,restarting,sntp_ready,factory_reset_requested;
 static bool expert_reboot_pending;
+static expert_values_t expert_saved;
 static bool restart_pending(void){return reboot_required||expert_reboot_pending;}
 
 static float meter_a[3],actual_a[3],xemex_a[3],wallbox_w,house_power_w,house_a[3];
@@ -1304,6 +1305,7 @@ static cJSON *status_json(bool include_token) {
     cJSON_AddNumberToObject(plan,"delivered_kwh",charge_plan.delivered_wh/1000);
     cJSON_AddNumberToObject(plan,"deadline_epoch",charge_plan.deadline_s);
     cJSON_AddBoolToObject(o,"expert_mode",settings.expert_mode);
+    cJSON_AddBoolToObject(o,"expert_parameters_modified",expert_modified(&expert_saved));
     cJSON_AddBoolToObject(o,"basic_mode",settings.basic_mode);
     cJSON_AddBoolToObject(o,"pv_allocation_enabled",settings.pv_allocation_enabled);
     cJSON_AddNumberToObject(o,"pv_priority",settings.pv_priority);
