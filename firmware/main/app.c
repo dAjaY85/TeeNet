@@ -167,6 +167,8 @@ static int shell_limits_code;
 static bool house_bus_ready,relay_ready,relay_on[1];
 
 static bool config_storage_ok,stats_storage_ok,storage_error,reboot_required,restarting,sntp_ready,factory_reset_requested;
+static bool expert_reboot_pending;
+static bool restart_pending(void){return reboot_required||expert_reboot_pending;}
 
 static float meter_a[3],actual_a[3],xemex_a[3],wallbox_w,house_power_w,house_a[3];
 static int64_t house_current_at;
@@ -570,7 +572,7 @@ static void contact_setup(void) {
 
 static void contact_sample(contact_state_t *contact,bool raw,int64_t now) {
     if(raw!=contact->raw) { contact->raw=raw; contact->changed_at=now; }
-    if(contact->stable!=contact->raw && now-contact->changed_at>=100) contact->stable=contact->raw;
+    if(contact->stable!=contact->raw && now-contact->changed_at>=ems_param(EP_CONTACT_DEBOUNCE)) contact->stable=contact->raw;
 }
 
 static float target_locked(int64_t now);
@@ -622,7 +624,7 @@ static void phase_step_locked(int64_t now) {
         } else {
             if(phase_attempt_at>0) {
                 if(!phase_no_load_since) phase_no_load_since=now;
-                if(now-phase_no_load_since>=300000) {
+                if(now-phase_no_load_since>=ems_param_ms(EP_PHASE_IDLE)) {
                     /* Without a vehicle-presence signal, stop retrying after
                        one bounded attempt. Keep the coil off until a new
                        explicit Start or a changed command arrives. */
@@ -640,13 +642,13 @@ static void phase_step_locked(int64_t now) {
         if(evcc_control.configured && evcc_desired_phases(&evcc_control,settings.charge_phases)==3 && phase_goal==1)phase_goal=3;
         bool fresh_meter=fresh(now,actual_at,wallbox_meter_ttl());
         float peak=fmaxf(actual_a[0],fmaxf(actual_a[1],actual_a[2]));
-        bool zero=fresh_meter && peak<1 && last_sent_current_at>phase_stop_at && fresh(now,wallbox_at,10000);
+        bool zero=fresh_meter && peak<ems_param(EP_PHASE_ZERO_A) && last_sent_current_at>phase_stop_at && fresh(now,wallbox_at,ems_param_ms(EP_SHELL_TTL));
         if(!zero) phase_zero_at=0;
         else if(!phase_zero_at) phase_zero_at=now;
-        if(phase_zero_at && now-phase_zero_at>=8000) {
+        if(phase_zero_at && now-phase_zero_at>=ems_param_ms(EP_PHASE_ZERO)) {
             relay_set(0,phase_goal==1);
             phase_move_at=now; phase_state=PHASE_MOVING;
-        } else if(now-phase_stop_at>60000) phase_state=PHASE_FAULT;
+        } else if(now-phase_stop_at>ems_param_ms(EP_PHASE_STOP_MAX)) phase_state=PHASE_FAULT;
         return;
     }
     if(phase_state==PHASE_MOVING) {
@@ -656,16 +658,16 @@ static void phase_step_locked(int64_t now) {
             phase_attempt_at=phase_no_load_since=0;
             memset(&pv_control,0,sizeof(pv_control));
             memset(&manual_filter,0,sizeof(manual_filter));
-        } else if(now-phase_move_at>5000) phase_state=PHASE_FAULT;
+        } else if(now-phase_move_at>ems_param_ms(EP_PHASE_FEEDBACK)) phase_state=PHASE_FAULT;
         return;
     }
     if(phase_state==PHASE_SETTLING) {
         if(!phase_feedback_matches(settings.phase_feedback_enabled,observed,phase_goal)) { phase_state=PHASE_FAULT; return; }
-        if(now-phase_move_at>=5000 && meter_at>phase_move_at && wallbox_at>phase_move_at) {
-            phase_state=PHASE_READY; phase_hold_until=now+300000;
+        if(now-phase_move_at>=ems_param_ms(EP_PHASE_SETTLE) && meter_at>phase_move_at && wallbox_at>phase_move_at) {
+            phase_state=PHASE_READY; phase_hold_until=now+ems_param_ms(EP_PHASE_HOLD);
             if(evcc_control.configured && phase_goal==1 && evcc_control.preparing)phase_attempt_at=now;
             phase_candidate_at=0; phase_candidate=phase_goal;
-        } else if(now-phase_move_at>30000) phase_state=PHASE_FAULT;
+        } else if(now-phase_move_at>ems_param_ms(EP_PHASE_DATA_MAX)) phase_state=PHASE_FAULT;
         return;
     }
     uint8_t desired=3;
@@ -675,9 +677,15 @@ static void phase_step_locked(int64_t now) {
         float surplus=phase_surplus_w_locked(now);
         float down=settings.min_charge_a*3*settings.nominal_v*settings.power_factor-300;
         float up=fmaxf(6300,down+800);
+        /* A 6 kW vehicle-priority ceiling must not prevent return to the
+           tested 6 kW three-phase range after the two-minute dwell. */
+        float three_phase_min=settings.min_charge_a*3*settings.nominal_v;
+        if(settings.pv_allocation_enabled && settings.pv_priority==1 &&
+           settings.pv_car_priority_w>=three_phase_min-5)
+            up=fminf(up,fmaxf(three_phase_min,settings.pv_car_priority_w));
         if(isfinite(surplus)) {
             if(settings.charge_phases==3 && surplus<down && surplus>=settings.min_charge_a*settings.nominal_v) desired=1;
-            else if(settings.charge_phases==1 && surplus>up) desired=3;
+            else if(settings.charge_phases==1 && surplus+5>=up) desired=3;
             else desired=settings.charge_phases;
         } else desired=settings.charge_phases;
     }
@@ -688,7 +696,7 @@ static void phase_step_locked(int64_t now) {
     if(desired==settings.charge_phases ||
        (automatic_change && now<phase_hold_until)) { phase_candidate_at=0; phase_candidate=desired; return; }
     if(phase_candidate!=desired || !phase_candidate_at) { phase_candidate=desired; phase_candidate_at=now; return; }
-    int64_t dwell=automatic_change?(desired==1?30000:120000):0;
+    int64_t dwell=automatic_change?ems_param_ms(desired==1?EP_PHASE_DOWN:EP_PHASE_UP):0;
     if(now-phase_candidate_at<dwell) return;
     phase_goal=desired; phase_state=PHASE_STOPPING; phase_stop_at=now; phase_zero_at=0;
 }
@@ -730,11 +738,11 @@ static bool pv_permitted_locked(int64_t now) {
 
         (!settings.battery_protect || (battery_ready_locked(now) && battery_soc>settings.battery_reserve_soc)) &&
 
-        !reboot_required && !restarting && !ota_in_progress && !unsupported_meter() &&
+        !restart_pending() && !restarting && !ota_in_progress && !unsupported_meter() &&
 
         feedback_ready(now) && wallbox_ready && fresh(now,meter_at,wallbox_meter_ttl()) &&
 
-        fresh(now,actual_at,wallbox_meter_ttl()) && fresh(now,wallbox_at,10000) && pv_fresh_locked(now);
+        fresh(now,actual_at,wallbox_meter_ttl()) && fresh(now,wallbox_at,ems_param_ms(EP_SHELL_TTL)) && pv_fresh_locked(now);
 
 }
 
@@ -750,7 +758,7 @@ static float unlatched_target_locked(int64_t now) {
     if(evcc_control.configured && settings.phase_switch_enabled &&
        (phase_idle_inhibit || evcc_desired_phases(&evcc_control,settings.charge_phases)!=settings.charge_phases))return 0;
 
-    if(reboot_required || restarting || ota_in_progress || unsupported_meter()) return 0;
+    if(restart_pending() || restarting || ota_in_progress || unsupported_meter()) return 0;
     if(settings.phase_switch_enabled && phase_state!=PHASE_READY) return 0;
     if(charge_plan.active && plan_phase==PLAN_CLOCK)return 0;
 
@@ -802,7 +810,7 @@ static const char *block_reason_locked(int64_t now) {
 
     if(restarting || ota_in_progress) return "maintenance";
 
-    if(reboot_required) return "reboot";
+    if(restart_pending()) return "reboot";
     if(!terms_accepted)return "agreement";
     if(evcc_configuring)return "maintenance";
     if(evcc_control.configured) {
@@ -840,7 +848,7 @@ static const char *block_reason_locked(int64_t now) {
 
     if(settings.mode==MODE_PV) {
 
-        if(!fresh(now,wallbox_at,10000)) return "wallbox";
+        if(!fresh(now,wallbox_at,ems_param_ms(EP_SHELL_TTL))) return "wallbox";
 
         if(pv_control.phase==PV_COOLDOWN) return "pv_cooldown";
 
@@ -1379,23 +1387,23 @@ static cJSON *status_json(bool include_token) {
     cJSON_AddBoolToObject(o,"battery_soc_ok",fresh(now,battery_soc_at,EMS_INPUT_TTL));
 
     nullable(o,"battery_soc_pct",battery_soc,fresh(now,battery_soc_at,EMS_INPUT_TTL));
-    nullable(o,"car_soc_pct",car_soc,settings.vehicle_soc_enabled && fresh(now,car_soc_at,600000));
+    nullable(o,"car_soc_pct",car_soc,settings.vehicle_soc_enabled && fresh(now,car_soc_at,ems_param_ms(EP_CAR_TTL)));
     nullable(o,"pv_generation_w",pv_generation_w,settings.pv_display_enabled && fresh(now,pv_generation_at,EMS_INPUT_TTL));
     nullable(o,"battery_charge_w",battery_charge_w,fresh(now,battery_charge_at,EMS_INPUT_TTL));
     nullable(o,"battery_discharge_w",battery_discharge_w,fresh(now,battery_discharge_at,EMS_INPUT_TTL));
 
-    cJSON_AddNumberToObject(o,"pv_start_threshold_a",fminf(settings.max_charge_a,active_min_a()+1));
+    cJSON_AddNumberToObject(o,"pv_start_threshold_a",pv_start_threshold(&settings));
 
-    cJSON_AddNumberToObject(o,"pv_stop_threshold_a",active_min_a()-0.5f);
+    cJSON_AddNumberToObject(o,"pv_stop_threshold_a",active_min_a()-ems_param(EP_PV_DEFICIT));
 
-    cJSON_AddBoolToObject(o,"meter_ok",meter_ok); cJSON_AddBoolToObject(o,"wallbox_ok",fresh(now,wallbox_at,10000));
+    cJSON_AddBoolToObject(o,"meter_ok",meter_ok); cJSON_AddBoolToObject(o,"wallbox_ok",fresh(now,wallbox_at,ems_param_ms(EP_SHELL_TTL)));
 
     cJSON_AddBoolToObject(o,"feedback_ok",actual_ok); cJSON_AddBoolToObject(o,"mqtt_ok",mqtt_online); cJSON_AddBoolToObject(o,"wifi_ok",wifi_online);
     nullable(o,"wifi_rssi_dbm",access_point.rssi,wifi_signal_ok);
 
     cJSON_AddBoolToObject(o,"wallbox_uart_ready",wallbox_ready); cJSON_AddBoolToObject(o,"meter_uart_ready",meter_ready);
 
-    cJSON_AddBoolToObject(o,"reboot_required",reboot_required); cJSON_AddBoolToObject(o,"clock_ok",date!=0);
+    cJSON_AddBoolToObject(o,"reboot_required",restart_pending()); cJSON_AddBoolToObject(o,"clock_ok",date!=0);
 
     cJSON_AddNumberToObject(o,"current_date",date);
 
@@ -1723,7 +1731,7 @@ static bool apply_control(cJSON *o) {
     if(next.mode==MODE_OFF) next.enabled=false;
     if(restart && phase_state==PHASE_FAULT && !phase_can_unlock_locked(now_ms())) valid=false;
 
-    if(valid && (!pv || !settings.zero_feed_enabled) && !restarting && !ota_in_progress && (!reboot_required || !next.enabled)) {
+    if(valid && (!pv || !settings.zero_feed_enabled) && !restarting && !ota_in_progress && (!restart_pending() || !next.enabled)) {
 
         transition=next.mode!=settings.mode || next.enabled!=settings.enabled;
 
@@ -2337,7 +2345,7 @@ static esp_err_t config_apply(httpd_req_t *req,cJSON *o,bool restore) {
         }
     }
     if(!applied) { reboot_required=true; settings.enabled=false; }
-    bool needs_reboot=reboot_required;
+    bool needs_reboot=restart_pending();
     UNLOCK();
     if(mqtt_client && previous_homeassistant && !next.homeassistant_enabled)
         homeassistant_discovery(false);
@@ -2352,6 +2360,7 @@ static esp_err_t config_apply(httpd_req_t *req,cJSON *o,bool restore) {
 
 }
 
+#include "expert_http.inc"
 #include "feature_http.inc"
 
 static esp_err_t time_handler(httpd_req_t *req) {
@@ -3005,6 +3014,7 @@ static void start_web(void) {
 
         {.uri="/api/history",.method=HTTP_GET,.handler=history_handler},{.uri="/api/sessions",.method=HTTP_GET,.handler=sessions_handler},{.uri="/api/sessions/day",.method=HTTP_GET,.handler=session_day_handler},{.uri="/api/export.csv",.method=HTTP_GET,.handler=csv_handler},
 
+        {.uri="/api/expert",.method=HTTP_POST,.handler=expert_post},
         {.uri="/api/config",.method=HTTP_GET,.handler=config_get},{.uri="/api/config",.method=HTTP_POST,.handler=config_post},
         {.uri="/api/events",.method=HTTP_GET,.handler=events_handler},
         {.uri="/api/backup",.method=HTTP_GET,.handler=backup_handler},
@@ -3139,17 +3149,17 @@ static void maintain_wifi(int64_t now) {
 
     LOCK(); wifi_fallback=err==ESP_OK && wanted==EMS_WIFI_AP_STA; UNLOCK();
 
-    if(err==ESP_OK && configured && !online && !forced && now-retry_at>=10000) { esp_wifi_connect(); retry_at=now; }
+    if(err==ESP_OK && configured && !online && !forced && now-retry_at>=ems_param_ms(EP_WIFI_RETRY)) { esp_wifi_connect(); retry_at=now; }
 
     /* A mains-powered idle controller may roam away from a persistently weak
        mesh node. Never interrupt an active charging session for this. */
-    if(err==ESP_OK && online && !forced && !charging && now-signal_at>=10000) {
+    if(err==ESP_OK && online && !forced && !charging && now-signal_at>=ems_param_ms(EP_WIFI_CHECK)) {
         wifi_ap_record_t ap_info={0};signal_at=now;
-        if(esp_wifi_sta_get_ap_info(&ap_info)==ESP_OK && ap_info.rssi<=-78) {
+        if(esp_wifi_sta_get_ap_info(&ap_info)==ESP_OK && ap_info.rssi<=ems_param(EP_WIFI_RSSI)) {
             if(!weak_since)weak_since=now;
-            if(now-weak_since>=120000 && now-last_roam>=600000) {
+            if(now-weak_since>=ems_param_ms(EP_WIFI_WEAK) && now-last_roam>=ems_param_ms(EP_WIFI_ROAM)) {
                 ESP_LOGW(TAG,"Weak WLAN (%d dBm); selecting a stronger mesh AP",ap_info.rssi);
-                weak_since=0;last_roam=now;esp_wifi_disconnect();retry_at=now-10000;
+                weak_since=0;last_roam=now;esp_wifi_disconnect();retry_at=now-ems_param_ms(EP_WIFI_RETRY);
             }
         } else weak_since=0;
     } else if(!online || charging) weak_since=0;
@@ -3160,7 +3170,7 @@ static void maintain_wifi(int64_t now) {
 
 static void relay_signals_locked(int64_t now) {
     if(!settings.relay_board_enabled || !relay_ready) return;
-    bool charging=settings.enabled && !restarting && !ota_in_progress && !reboot_required &&
+    bool charging=settings.enabled && !restarting && !ota_in_progress && !restart_pending() &&
         fresh(now,actual_at,wallbox_meter_ttl()) && target_locked(now)>0 &&
         fmaxf(actual_a[0],fmaxf(actual_a[1],actual_a[2]))>=1;
     bool fault=!fresh(now,actual_at,wallbox_meter_ttl()) || !wallbox_ready || !feedback_ready(now) ||
@@ -3188,7 +3198,7 @@ static void status_task(void *arg) {
         contacts_step_locked(now);
         phase_step_locked(now);
         relay_signals_locked(now);
-        pv_control_step(&pv_control,pv_permitted_locked(now),pv_ramp_available_phases(settings.pv_surplus_a,pv_control.target_a,actual_a,settings.charge_phases),active_min_a(),settings.max_charge_a,now);
+        pv_control_step_threshold(&pv_control,pv_permitted_locked(now),pv_ramp_available_phases(settings.pv_surplus_a,pv_control.target_a,actual_a,settings.charge_phases),active_min_a(),settings.max_charge_a,pv_start_threshold(&settings),now);
         /* Keep the anti-cycle detector on the deterministic one-second
            controller clock. HTTP rendering and frequent Wallbox requests
            must be read-only views of this state. */
@@ -3198,7 +3208,7 @@ static void status_task(void *arg) {
         bool learn=feedback_ready(now) && fresh(now,wallbox_at,5000) && fresh(now,last_sent_current_at,5000) &&
             !charge_guard_blocked(&charge_guard,now) && !settings.phase_switch_enabled &&
             !settings.grid_guard_enabled && !(settings.evu_input_enabled && evu_contact.stable) &&
-            !reboot_required && !restarting && !ota_in_progress && !charge_plan.active;
+            !restart_pending() && !restarting && !ota_in_progress && !charge_plan.active;
         if(current_calibration_step(&current_calibration,&settings,learn,unguarded_target,actual_a,actual_at,now)){
             saved_settings.current_offset_a=settings.current_offset_a;calibration_dirty=true;
         }
@@ -3270,7 +3280,7 @@ static void status_task(void *arg) {
 
         maintain_wifi(now);
 
-        if(now-publish>=20000) { mqtt_state(); publish=now; }
+        if(now-publish>=ems_param_ms(EP_MQTT_PUBLISH)) { mqtt_state(); publish=now; }
 
         if(now-reconnect>=10000) {
 
@@ -3317,7 +3327,7 @@ void app_main(void) {
 
     }
 
-    load_settings(); terms_load(); evcc_load(); load_energy(); load_plan(); load_diagnostics();
+    load_settings(); expert_load(); terms_load(); evcc_load(); load_energy(); load_plan(); load_diagnostics();
     if(evcc_control.configured&&charge_plan.active){charge_plan.active=false;plan_phase=PLAN_OFF;plan_dirty=true;plan_revision++;} phase_setup(); contact_setup(); setenv("TZ","CET-1CEST,M3.5.0,M10.5.0/3",1); tzset();
     LOCK();esp_reset_reason_t reset=esp_reset_reason();event_locked(reset==ESP_RST_TASK_WDT||reset==ESP_RST_INT_WDT||reset==ESP_RST_WDT?"boot_watchdog":reset==ESP_RST_BROWNOUT?"boot_brownout":"boot");UNLOCK();
 

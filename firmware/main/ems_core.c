@@ -451,7 +451,8 @@ float estimated_charge_power(const settings_t *s,const float currents[3]) {
 float solar_current(const settings_t *s,const float actual[3],float grid_w) {
     if(!isfinite(grid_w)) return 0;
     for(int p=0;p<s->charge_phases;p++) if(!range(actual[p],0,999)) return 0;
-    float sum=0; for(int p=0;p<s->charge_phases;p++) sum+=actual[p];
+    float sum=0,peak=0; for(int p=0;p<s->charge_phases;p++) {sum+=actual[p];peak=fmaxf(peak,actual[p]);}
+    if(peak<1)sum=0; /* Use the same idle floor as the EV power calculation. */
     float current=sum/s->charge_phases-(grid_w-s->zero_reserve_w)/(s->charge_phases*s->nominal_v);
     return fmaxf(0,fminf(s->max_charge_a,current));
 }
@@ -468,13 +469,29 @@ float pv_allocation_grid(const settings_t *s,const float actual[3],float grid_w,
     float existing=ev-grid_w-discharge_w+s->zero_reserve_w;
     float budget=fmaxf(0,existing+charge_w), car=budget;
     if(s->pv_priority==0) car=fmaxf(0,budget-(soc>=99?0:s->pv_house_priority_w));
-    else if(s->pv_priority==1) car=fminf(budget,s->pv_car_priority_w);
+    else if(s->pv_priority==1) {
+        float limit=s->pv_car_priority_w,minimum=s->min_charge_a*s->charge_phases*s->nominal_v;
+        /* 8.7 A rounds the tested 6 kW minimum to 6003 W. Do not make a
+           displayed 6 kW ceiling unreachable because of these three watts. */
+        if(limit>=minimum-5 && limit<minimum)limit=minimum;
+        car=fminf(budget,limit);
+    }
     else if(s->pv_priority==2 && soc<99)
         car=budget*s->pv_car_priority_w/(s->pv_house_priority_w+s->pv_car_priority_w);
     /* Feed the allocation into the established ramp/battery allowance logic.
        Do not clamp to the present phase limit here: phase selection needs the
        complete budget to decide whether three phases are appropriate. */
     return grid_w+existing-car;
+}
+
+float pv_start_threshold(const settings_t *s) {
+    float threshold=fminf(s->max_charge_a,s->min_charge_a+ems_param(EP_PV_START_MARGIN));
+    if(s->pv_allocation_enabled && s->battery_protect && s->zero_feed_enabled && s->pv_priority==1) {
+        float limit=s->pv_car_priority_w/(s->charge_phases*s->nominal_v);
+        if(isfinite(limit) && limit>=s->min_charge_a-0.01f)
+            threshold=fminf(threshold,fmaxf(s->min_charge_a,limit));
+    }
+    return threshold;
 }
 
 float battery_solar_current(const settings_t *s,const float actual[3],float grid_w,float soc,bool battery_fresh,float discharge_w,bool discharge_fresh) {
@@ -549,7 +566,7 @@ float pv_ramp_available_phases(float available,float target,const float actual[3
     for(unsigned p=0;p<phases;p++) { if(!range(actual[p],0,999)) return 0; sum+=actual[p]; peak=fmaxf(peak,actual[p]); }
     /* No upward ramp before the vehicle draws current; keep the start request.
        Afterwards allow at most 1 A ahead of measured vehicle current. */
-    return fminf(available,peak<1?target:sum/phases+1.0f);
+    return fminf(available,peak<1?target:sum/phases+ems_param(EP_PV_LEAD));
 }
 float pv_ramp_available(float available,float target,const float actual[3]) {
     return pv_ramp_available_phases(available,target,actual,3);
@@ -558,7 +575,7 @@ static void pv_stop(pv_control_t *c,int64_t now) {
     if(c->target_a>0) { c->stopped=true; c->stopped_at=now; }
     c->target_a=0; c->above_at=-1; c->below_at=-1; c->wait_ms=0;
 }
-void pv_control_step(pv_control_t *c,bool permitted,float available,float minimum,float maximum,int64_t now) {
+void pv_control_step_threshold(pv_control_t *c,bool permitted,float available,float minimum,float maximum,float start_threshold,int64_t now) {
     bool clock_reset=c->initialized && now<c->last_at;
     bool stalled=c->initialized && now-c->last_at>5000;
     if(!c->initialized || clock_reset) {
@@ -566,38 +583,40 @@ void pv_control_step(pv_control_t *c,bool permitted,float available,float minimu
         if(clock_reset) { c->stopped=true; c->stopped_at=now; }
     }
     c->last_at=now; c->wait_ms=0;
-    if(!permitted || stalled || !range(available,0,63) || !range(minimum,6,63) || !range(maximum,minimum,63)) {
+    if(!permitted || stalled || !range(available,0,63) || !range(minimum,6,63) || !range(maximum,minimum,63) || !range(start_threshold,minimum,maximum)) {
         pv_stop(c,now); c->phase=PV_BLOCKED; return;
     }
     if(c->target_a<=0) {
-        if(c->stopped && now-c->stopped_at<120000) {
+        if(c->stopped && now-c->stopped_at<ems_param_ms(EP_PV_COOLDOWN)) {
             c->phase=PV_COOLDOWN; c->above_at=-1;
-            c->wait_ms=(uint32_t)(120000-(now-c->stopped_at)); return;
+            c->wait_ms=(uint32_t)(ems_param_ms(EP_PV_COOLDOWN)-(now-c->stopped_at)); return;
         }
-        float start_threshold=fminf(maximum,minimum+1.0f);
-        if(available<start_threshold) { c->above_at=-1; c->phase=PV_WAITING; return; }
+        if(available+0.0001f<start_threshold) { c->above_at=-1; c->phase=PV_WAITING; return; }
         if(c->above_at<0) c->above_at=now;
-        if(now-c->above_at<60000) {
-            c->phase=PV_STARTING; c->wait_ms=(uint32_t)(60000-(now-c->above_at)); return;
+        if(now-c->above_at<EMS_PV_START_MS) {
+            c->phase=PV_STARTING; c->wait_ms=(uint32_t)(EMS_PV_START_MS-(now-c->above_at)); return;
         }
         c->target_a=start_threshold; c->adjusted_at=now; c->below_at=-1; c->phase=PV_RUNNING;
         return;
     }
-    if(available<minimum-0.5f) {
+    if(available<minimum-ems_param(EP_PV_DEFICIT)) {
         if(c->below_at<0) c->below_at=now;
-        if(now-c->below_at>=30000) {
-            pv_stop(c,now); c->phase=PV_COOLDOWN; c->wait_ms=120000; return;
+        if(now-c->below_at>=ems_param_ms(EP_PV_STOP)) {
+            pv_stop(c,now); c->phase=PV_COOLDOWN; c->wait_ms=(uint32_t)ems_param_ms(EP_PV_COOLDOWN); return;
         }
-        c->phase=PV_STOPPING; c->wait_ms=(uint32_t)(30000-(now-c->below_at));
+        c->phase=PV_STOPPING; c->wait_ms=(uint32_t)(ems_param_ms(EP_PV_STOP)-(now-c->below_at));
     } else { c->below_at=-1; c->phase=PV_RUNNING; }
     float desired=fmaxf(minimum,fminf(maximum,available));
     /* Increase twice as often; retain the proven downward timing. The caller
        still caps the request to 1 A ahead of measured vehicle current. */
-    int64_t adjust_interval=desired>c->target_a?5000:10000;
+    int64_t adjust_interval=ems_param_ms(desired>c->target_a?EP_PV_UP:EP_PV_DOWN);
     if(now-c->adjusted_at>=adjust_interval) {
-        if(fabsf(desired-c->target_a)>=0.2f) c->target_a=fminf(desired,c->target_a+1.0f);
+        if(fabsf(desired-c->target_a)>=ems_param(EP_PV_DEADBAND)) c->target_a=fminf(desired,c->target_a+ems_param(EP_PV_STEP));
         c->adjusted_at=now;
     }
+}
+void pv_control_step(pv_control_t *c,bool permitted,float available,float minimum,float maximum,int64_t now) {
+    pv_control_step_threshold(c,permitted,available,minimum,maximum,fminf(maximum,minimum+ems_param(EP_PV_START_MARGIN)),now);
 }
 bool pv_control_takeover(pv_control_t *c,bool permitted,float previous,
                          const float actual[3],unsigned phases,float minimum,float maximum,int64_t now) {
@@ -693,7 +712,7 @@ bool charge_guard_blocked(const charge_guard_t *g,int64_t now) {
 }
 void charge_guard_step(charge_guard_t *g,bool requested,bool feedback_ok,const float actual[3],float minimum_a,int64_t now) {
     if(g->latched) return;
-    if(now<g->last_at) { memset(g,0,sizeof(*g)); g->retry_until=now+30000; }
+    if(now<g->last_at) { memset(g,0,sizeof(*g)); g->retry_until=now+ems_param_ms(EP_STOP_RETRY); }
     if(now-g->last_at>EMS_METER_TTL) g->low_since=g->charging_since=0;
     g->last_at=now;
     unsigned keep=0;
@@ -720,7 +739,7 @@ void charge_guard_step(charge_guard_t *g,bool requested,bool feedback_ok,const f
     if(now-g->low_since<EMS_CHARGE_STOP_CONFIRM_MS) return;
     g->seen_charging=false; g->low_since=g->charging_since=0;
     g->stops[g->stop_count++]=now;
-    g->latched=g->stop_count>=EMS_CHARGE_STOP_LIMIT; g->retry_until=now+30000;
+    g->latched=g->stop_count>=(unsigned)ems_param(EP_STOP_COUNT); g->retry_until=now+ems_param_ms(EP_STOP_RETRY);
 }
 void control_report(const settings_t *s,const float actual[3],float target,float house_power_w,bool house_power_ok,float out[3]) {
     for (int p=0;p<3;p++) {

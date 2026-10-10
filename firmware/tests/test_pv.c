@@ -8,30 +8,32 @@ static void advance(pv_control_t *c,int64_t from,int64_t to,float available,bool
 }
 int main(void) {
     pv_control_t c={0};
-    /* A full minute of surplus is required; a short interruption restarts it. */
-    advance(&c,0,59000,9,true); assert(c.target_a==0 && c.wait_ms==1000);
-    advance(&c,60000,60000,8.9f,true); assert(c.phase==PV_WAITING);
-    advance(&c,61000,120000,9,true); assert(c.target_a==0);
-    advance(&c,121000,121000,9,true); assert(c.target_a==9 && c.phase==PV_RUNNING);
-    advance(&c,122000,125000,16,true); assert(c.target_a==9);
-    advance(&c,126000,126000,16,true); assert(c.target_a==10);
-    advance(&c,127000,131000,16,true); assert(c.target_a==11);
-    advance(&c,132000,141000,16,true); assert(c.target_a==13);
+    /* Thirty seconds of continuous surplus; a short interruption restarts it. */
+    advance(&c,0,29000,9,true); assert(c.target_a==0 && c.wait_ms==1000);
+    advance(&c,30000,30000,8.9f,true); assert(c.phase==PV_WAITING);
+    advance(&c,31000,60000,9,true); assert(c.target_a==0);
+    pv_control_step(&c,true,9,8,16,60999); assert(c.target_a==0 && c.wait_ms==1);
+    advance(&c,61000,61000,9,true); assert(c.target_a==9 && c.phase==PV_RUNNING);
+    /* The established ramp and stop behavior must remain unchanged. */
+    advance(&c,62000,65000,16,true); assert(c.target_a==9);
+    advance(&c,66000,66000,16,true); assert(c.target_a==10);
+    advance(&c,67000,71000,16,true); assert(c.target_a==11);
+    advance(&c,72000,81000,16,true); assert(c.target_a==13);
     /* A cloud lasting less than 30 s reduces current but does not restart the car. */
-    advance(&c,142000,170000,0,true); assert(c.target_a==8 && c.phase==PV_STOPPING);
-    advance(&c,171000,171000,9,true); assert(c.target_a>0 && c.phase==PV_RUNNING);
-    advance(&c,172000,201000,0,true); assert(c.target_a==8);
-    advance(&c,202000,202000,0,true); assert(c.target_a==0 && c.phase==PV_COOLDOWN && c.wait_ms==120000);
+    advance(&c,82000,110000,0,true); assert(c.target_a==8 && c.phase==PV_STOPPING);
+    advance(&c,111000,111000,9,true); assert(c.target_a>0 && c.phase==PV_RUNNING);
+    advance(&c,112000,141000,0,true); assert(c.target_a==8);
+    advance(&c,142000,142000,0,true); assert(c.target_a==0 && c.phase==PV_COOLDOWN && c.wait_ms==120000);
     /* Returning sun cannot bypass cooldown, then another full start check. */
-    advance(&c,203000,321000,16,true); assert(c.target_a==0 && c.phase==PV_COOLDOWN);
-    advance(&c,322000,381000,16,true); assert(c.target_a==0 && c.phase==PV_STARTING);
-    advance(&c,382000,382000,16,true); assert(c.target_a==9);
+    advance(&c,143000,261000,16,true); assert(c.target_a==0 && c.phase==PV_COOLDOWN);
+    advance(&c,262000,291000,16,true); assert(c.target_a==0 && c.phase==PV_STARTING);
+    advance(&c,292000,292000,16,true); assert(c.target_a==9);
     /* Stop or a sensor failure must bypass the sun/cloud delay immediately. */
-    advance(&c,383000,383000,16,false); assert(c.target_a==0 && c.phase==PV_BLOCKED);
-    advance(&c,384000,384000,16,true); assert(c.target_a==0 && c.phase==PV_COOLDOWN);
-    advance(&c,385000,562000,16,true); assert(c.target_a==0);
-    advance(&c,563000,563000,16,true); assert(c.target_a==9);
-    advance(&c,564000,564000,NAN,true); assert(c.target_a==0 && c.phase==PV_BLOCKED);
+    advance(&c,293000,293000,16,false); assert(c.target_a==0 && c.phase==PV_BLOCKED);
+    advance(&c,294000,294000,16,true); assert(c.target_a==0 && c.phase==PV_COOLDOWN);
+    advance(&c,295000,442000,16,true); assert(c.target_a==0);
+    advance(&c,443000,443000,16,true); assert(c.target_a==9);
+    advance(&c,444000,444000,NAN,true); assert(c.target_a==0 && c.phase==PV_BLOCKED);
     /* Threshold noise for ten minutes never starts charging. */
     pv_control_t noise={0};
     for(int64_t t=0;t<=600000;t+=1000) {

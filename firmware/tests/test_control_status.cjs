@@ -1,6 +1,6 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const source=fs.readFileSync('main/dashboard.js','utf8');
-const ctx=vm.createContext({Math,Number,reasons:{meter:'Wallbox-Zähler fehlt'},powerFactor:n=>.23*n});
+const ctx=vm.createContext({Math,Number,reasons:{meter:'Wallbox-Zähler fehlt',battery_reserve:'Entladegrenze erreicht · warte auf PV-Überschuss.'},powerFactor:n=>.23*n});
 vm.runInContext(source.slice(source.indexOf('function controlStatus('),source.indexOf('function render(){')),ctx);
 const base={enabled:true,block_reason:'none',phase_switch_enabled:true,phase_state:'bereit',phase_wait_kind:'none',charge_phases:1,feedback_ok:true,actual_a:[11,11,11],estimate_w:2530,target_current_a:11,mode:'manual'};
 const status=(extra={},valid=true)=>ctx.controlStatus({...base,...extra},valid);
@@ -18,6 +18,15 @@ assert.match(status({block_reason:'meter',actual_a:[null,null,null],feedback_ok:
 assert.match(status({actual_a:[.1,.1,.1]}).text,/warte auf Fahrzeug/);
 assert.match(status({phase_wait_kind:'hold',phase_wait_s:290}).text,/frühestens in 290 s/);
 assert.match(status({battery_buffer_active:true,battery_buffer_remaining_s:121}).text,/Wolkenpuffer 3 min/);
+assert.equal(status({block_reason:'battery_reserve'}).kind,'waiting');
+assert.equal(status({block_reason:'battery_reserve'}).help,null,'reserve reached needs no repair link');
+const statusNodes={};ctx.$=id=>statusNodes[id]||=({dataset:{}});
+ctx.valid=true;ctx.charging=false;
+const renderStatus=source.slice(source.indexOf("  let message='';",source.indexOf('function render(){')),source.indexOf('  const locked=',source.indexOf('function render(){')));
+function rendered(extra={}){ctx.s={...base,storage_ok:true,block_reason:'battery_reserve',...extra};vm.runInContext('{'+renderStatus+'}',ctx);return statusNodes['control-status'].dataset.kind;}
+assert.equal(rendered(),'waiting','render does not promote normal reserve wait to fault');
+assert.equal(rendered({storage_ok:false}),'fault','real storage fault remains visible');
+assert.equal(rendered({block_reason:'meter'}),'fault','meter failure remains visible');
 assert(!fs.readFileSync('main/dashboard.html','utf8').includes('relay-card'));
 let unlock,request;
 const ui=vm.createContext({$:()=>({addEventListener:(event,callback)=>{unlock=callback;}}),

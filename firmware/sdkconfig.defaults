@@ -9,3 +9,6 @@ CONFIG_LWIP_MAX_SOCKETS=16
 # (Accept*, Sec-CH-UA, language and cache validators).  The ESP-IDF default
 # used by the original build rejected those requests with HTTP 431.
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
+
+# Release firmware must fit the existing 2-MB OTA slots.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y

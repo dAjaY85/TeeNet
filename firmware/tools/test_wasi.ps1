@@ -6,7 +6,7 @@ $env:ZIG_GLOBAL_CACHE_DIR = Join-Path $workspaceRoot 'toolcache\zig-global-cache
 $env:ZIG_LOCAL_CACHE_DIR = Join-Path $workspaceRoot 'toolcache\zig-local-cache'
 $compiler = Join-Path $workspaceRoot 'toolcache\zig\zig-windows-x86_64-0.13.0\zig.exe'
 $jsonDir = Join-Path $workspaceRoot 'toolcache\esp-idf\v5.3.2\esp-idf\components\json\cJSON'
-foreach ($suite in @('core','pv','runtime','restart','review','sessions','calibration','hardware','hardware_atom','features','huawei','network','grid_fallback','fixed_phase','basic_mode','priority','support','support_atom','em24','opendtu','github_release','github_release_atom','evcc','rs485','rs485_io','terms')) {
+foreach ($suite in @('core','pv','runtime','restart','review','sessions','calibration','hardware','hardware_atom','features','huawei','network','grid_fallback','fixed_phase','basic_mode','priority','support','support_atom','em24','opendtu','github_release','github_release_atom','evcc','rs485','rs485_io','terms','expert')) {
     $baseSuite = $suite -replace '_atom$',''
     $defines = @()
     if ($suite.EndsWith('_atom')) { $defines += '-DCONFIG_TEE_BOARD_ATOMS3_LITE=1' }
@@ -22,6 +22,7 @@ foreach ($suite in @('core','pv','runtime','restart','review','sessions','calibr
     if ($suite -eq 'sessions') { $inputFiles = @('main/charge_sessions.c') }
     if ($suite -eq 'review') { $inputFiles += @('main/meter_json.c','main/shelly_modbus.c',(Join-Path $jsonDir 'cJSON.c')) }
     $testFile = if ($suite -eq 'hardware_atom') { 'tests/test_hardware_atom.c' } else { "tests/test_$baseSuite.c" }
+    $inputFiles += @("main/expert_params.c")
     & $compiler cc -target wasm32-wasi -std=c17 -Wall -Wextra -Werror @defines -I main -I $jsonDir @inputFiles $testFile -o "tests/test_$suite.wasm"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     node tools/run_wasi_test.cjs "tests/test_$suite.wasm"
@@ -67,4 +68,10 @@ node tests/test_settings_notice.cjs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 node tests/test_demo_restart.cjs
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+node tests/test_expert_demo_restart.cjs
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+node tests/test_expert_edit_lock.cjs
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+node tests/test_expert_curve.cjs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

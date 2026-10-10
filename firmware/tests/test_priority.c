@@ -47,5 +47,32 @@ int main(void){
     measured[0]=9;measured[1]=measured[2]=0;
     assert(pv_control_takeover(&c,true,10,measured,1,8,16,10000));near(c.target_a,9);
     pv_control_step(&c,false,12,8,16,11000);assert(c.target_a==0); /* phase/fault interlock wins */
-    puts("PASS: PV allocation, import/discharge accounting, live settings, seamless takeover and stop interlocks");
+    /* Idle EV, 3.4 kW exported and 5.1 kW entering the house battery:
+       a 6 kW vehicle ceiling must not wait forever for a 6.7 kW start. */
+    settings_defaults(&s);s.battery_protect=s.zero_feed_enabled=s.pv_allocation_enabled=true;s.battery_reserve_soc=5;
+    s.pv_priority=1;s.pv_car_priority_w=6000;
+    float adjusted=pv_allocation_grid(&s,idle,-3400,5100,0,18,true);
+    float available=battery_solar_current(&s,idle,adjusted,18,true,0,true);
+    near(available,s.min_charge_a);near(pv_start_threshold(&s),s.min_charge_a);
+    memset(&c,0,sizeof(c));
+    for(int t=0;t<=29000;t+=1000)pv_control_step_threshold(&c,true,available,s.min_charge_a,16,pv_start_threshold(&s),t);
+    assert(c.target_a==0&&c.phase==PV_STARTING&&c.wait_ms==1000);
+    pv_control_step_threshold(&c,true,available,s.min_charge_a,16,pv_start_threshold(&s),30000);
+    near(c.target_a,s.min_charge_a);assert(c.phase==PV_RUNNING);
+    /* Low actual surplus cannot be made sufficient by the configured ceiling. */
+    adjusted=pv_allocation_grid(&s,idle,-3400,0,0,18,true);
+    available=battery_solar_current(&s,idle,adjusted,18,true,0,true);
+    memset(&c,0,sizeof(c));
+    for(int t=0;t<=90000;t+=1000)pv_control_step_threshold(&c,true,available,s.min_charge_a,16,pv_start_threshold(&s),t);
+    assert(c.target_a==0&&c.phase==PV_WAITING);
+    s.charge_phases=1;near(pv_start_threshold(&s),s.min_charge_a+1);
+    memset(&c,0,sizeof(c));available=3400.0f/230;
+    for(int t=0;t<=60000;t+=1000)pv_control_step_threshold(&c,true,available,s.min_charge_a,16,pv_start_threshold(&s),t);
+    assert(c.target_a>=s.min_charge_a&&c.phase==PV_RUNNING);
+    s.charge_phases=3;s.pv_car_priority_w=5500;
+    near(pv_start_threshold(&s),s.min_charge_a+1);
+    adjusted=pv_allocation_grid(&s,idle,-3400,5100,0,18,true);
+    assert(solar_current(&s,idle,adjusted)<s.min_charge_a);
+    s.pv_allocation_enabled=false;near(pv_start_threshold(&s),s.min_charge_a+1);
+    puts("PASS: PV allocation, bounded minimum-power start, single-phase start, accounting and stop interlocks");
 }

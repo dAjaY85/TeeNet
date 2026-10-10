@@ -108,11 +108,11 @@ static void pv_replay(void) {
     assert(battery_cloud_current(&buffer,&s,amps,0,70,true,3000,true,false,true,8,1002000)<8);
     /* A WiFi or meter failure bypasses all cloud/stop delays. */
     pv_control_step(&pv,false,16,8,16,972000);assert(pv.target_a==0);
-    for(int64_t t=973000;t<1152000;t+=1000){pv_control_step(&pv,true,16,8,16,t);assert(pv.target_a==0);}
-    pv_control_step(&pv,true,16,8,16,1152000);assert(pv.target_a>=8);
+    for(int64_t t=973000;t<1122000;t+=1000){pv_control_step(&pv,true,16,8,16,t);assert(pv.target_a==0);}
+    pv_control_step(&pv,true,16,8,16,1122000);assert(pv.target_a>=8);
     /* A short household load increase does not chatter the contactor. */
-    for(int64_t t=1153000;t<1253000;t+=1000){pv_control_step(&pv,true,(t/10000)%2?7.2f:12,8,16,t);assert(pv.target_a>=8);}
-    pv_control_step(&pv,true,NAN,8,16,1253000);assert(pv.target_a==0);
+    for(int64_t t=1123000;t<1223000;t+=1000){pv_control_step(&pv,true,(t/10000)%2?7.2f:12,8,16,t);assert(pv.target_a>=8);}
+    pv_control_step(&pv,true,NAN,8,16,1223000);assert(pv.target_a==0);
     /* Settings and minimum/ramp implementation have not been retuned. */
     assert(s.min_charge_a==8.7f && s.max_charge_a==16);
 }

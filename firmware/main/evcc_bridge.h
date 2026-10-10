@@ -1,9 +1,10 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include "expert_params.h"
 
-#define EVCC_SHELL_TTL_MS 15000
-#define EVCC_LEASE_MS 90000
+#define EVCC_SHELL_TTL_MS (ems_param_ms(EP_EVCC_STATUS_TTL))
+#define EVCC_LEASE_MS (ems_param_ms(EP_EVCC_LEASE))
 
 typedef struct {
     char state; /* '?' is unknown, never silently interpreted as disconnected. */

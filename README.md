@@ -1,4 +1,4 @@
-# TeeNet 1.17
+# TeeNet 1.18
 
 Lokale ESP32-S3-Steuerung für die **Shell Recharge Advanced 3.0**.
 

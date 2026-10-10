@@ -2,25 +2,27 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "expert_params.h"
 
 #define EMS_DAYS 30
 #define EMS_HISTORY 120
 #define EMS_SOURCES 2
-#define EMS_METER_TTL 5000
-#define EMS_NETWORK_METER_TTL 15000
-#define EMS_INPUT_TTL 30000
-#define EMS_HOUSE_TTL 10000
-#define EMS_NETWORK_HOUSE_TTL 20000
-#define EMS_GRID_FALLBACK_W 8000.0f
-#define EMS_CHARGE_STOP_CONFIRM_MS 20000
+#define EMS_METER_TTL (ems_param_ms(EP_METER_TTL))
+#define EMS_NETWORK_METER_TTL (ems_param_ms(EP_NET_METER_TTL))
+#define EMS_INPUT_TTL (ems_param_ms(EP_INPUT_TTL))
+#define EMS_HOUSE_TTL (ems_param_ms(EP_HOUSE_TTL))
+#define EMS_NETWORK_HOUSE_TTL (ems_param_ms(EP_NET_HOUSE_TTL))
+#define EMS_GRID_FALLBACK_W (ems_param(EP_GRID_FALLBACK))
+#define EMS_CHARGE_STOP_CONFIRM_MS (ems_param_ms(EP_STOP_CONFIRM))
 #define EMS_CHARGE_STOP_LIMIT 5
-#define EMS_CHARGE_STOP_WINDOW_MS 300000
+#define EMS_CHARGE_STOP_WINDOW_MS (ems_param_ms(EP_STOP_WINDOW))
 #define EMS_SETTINGS_VERSION 27
 #define EMS_MIN_CHARGE_A 6.0f
 #define EMS_BATTERY_CAPACITY_KWH 20.0f
 #define EMS_BATTERY_DISCHARGE_MAX_W 4000.0f
-#define EMS_BATTERY_BUFFER_MS 900000
-#define EMS_BATTERY_BUFFER_RECOVERY_MS 60000
+#define EMS_BATTERY_BUFFER_MS (ems_param_ms(EP_BAT_BUFFER))
+#define EMS_BATTERY_BUFFER_RECOVERY_MS (ems_param_ms(EP_BAT_RECOVERY))
+#define EMS_PV_START_MS (ems_param_ms(EP_PV_START))
 
 typedef enum { MODE_OFF, MODE_MANUAL, MODE_GRID_LIMIT, MODE_PV } control_mode_t;
 typedef struct {
@@ -180,6 +182,7 @@ bool decode_sdm(const uint8_t *frame, size_t length, uint8_t address, float *out
 float solar_current(const settings_t *s, const float actual[3], float grid_w);
 float pv_allocation_grid(const settings_t *s, const float actual[3], float grid_w,
     float charge_w, float discharge_w, float soc, bool battery_fresh);
+float pv_start_threshold(const settings_t *s);
 float estimated_charge_power(const settings_t *s, const float currents[3]);
 float battery_solar_current(const settings_t *s, const float actual[3], float grid_w,
                             float soc, bool battery_fresh, float discharge_w, bool discharge_fresh);
@@ -207,6 +210,8 @@ typedef struct {
 } pv_control_t;
 void pv_control_step(pv_control_t *control, bool permitted, float available_a,
                      float minimum_a, float maximum_a, int64_t now);
+void pv_control_step_threshold(pv_control_t *control, bool permitted, float available_a,
+    float minimum_a, float maximum_a, float start_a, int64_t now);
 bool pv_control_takeover(pv_control_t *control, bool permitted, float previous_target,
     const float actual[3], unsigned phases, float minimum, float maximum, int64_t now);
 bool parse_number(const char *text, double lo, double hi, double *out);
@@ -243,7 +248,7 @@ void manual_report_smooth(manual_report_filter_t *filter,const settings_t *setti
                           float target,int64_t now,float report[3]);
 typedef struct {
     bool seen_charging, latched;
-    int64_t low_since, charging_since, last_at, retry_until, stops[EMS_CHARGE_STOP_LIMIT];
+    int64_t low_since, charging_since, last_at, retry_until, stops[10];
     unsigned stop_count;
 } charge_guard_t;
 void charge_guard_step(charge_guard_t *guard, bool requested, bool feedback_ok,
