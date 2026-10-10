@@ -20,6 +20,28 @@ bool github_release_parse(const char *json,size_t maximum,github_release_t *out)
     cJSON *root=cJSON_Parse(json);
     if(!root)return false;
     bool ok=false;
+    cJSON *version=cJSON_GetObjectItem(root,"version"),*files=cJSON_GetObjectItem(root,"files"),*profiles=cJSON_GetObjectItem(root,"profiles");
+    if(cJSON_IsString(version)&&cJSON_IsArray(files)&&cJSON_IsObject(profiles)){
+        if(!version_valid(version->valuestring))goto finish;
+        cJSON *profile=cJSON_GetObjectItem(profiles,EMS_HARDWARE_ID),*ota=profile?cJSON_GetObjectItem(profile,"ota"):NULL;
+        char name[64],url[224];snprintf(name,sizeof(name),"TeeNet-%s%s-ota.bin",version->valuestring,EMS_OTA_ASSET_SUFFIX);
+        snprintf(url,sizeof(url),"https://github.com/stetastic/TeeNet/releases/download/v%s/%s",version->valuestring,name);
+        if(!cJSON_IsString(ota)||strcmp(ota->valuestring,name))goto finish;
+        cJSON *file;
+        cJSON_ArrayForEach(file,files){
+            cJSON *n=cJSON_GetObjectItem(file,"name"),*s=cJSON_GetObjectItem(file,"bytes"),*h=cJSON_GetObjectItem(file,"sha256");
+            if(!cJSON_IsString(n)||strcmp(n->valuestring,name))continue;
+            if(ok){ok=false;break;}
+            if(!cJSON_IsNumber(s)||!isfinite(s->valuedouble)||s->valuedouble<1024||s->valuedouble>maximum||floor(s->valuedouble)!=s->valuedouble||
+               !cJSON_IsString(h)||strlen(h->valuestring)!=64)break;
+            bool hash=true;for(int i=0;i<64;i++)if(!isxdigit((unsigned char)h->valuestring[i]))hash=false;
+            if(!hash)break;
+            strcpy(out->version,version->valuestring);strcpy(out->url,url);out->bytes=(uint32_t)s->valuedouble;
+            for(int i=0;i<64;i++)out->sha256[i]=(char)tolower((unsigned char)h->valuestring[i]);
+            out->sha256[64]=0;ok=true;
+        }
+        goto finish;
+    }
     cJSON *tag=cJSON_GetObjectItem(root,"tag_name"),*draft=cJSON_GetObjectItem(root,"draft"),*pre=cJSON_GetObjectItem(root,"prerelease"),*assets=cJSON_GetObjectItem(root,"assets");
     if(!cJSON_IsString(tag)||tag->valuestring[0]!='v'||!version_valid(tag->valuestring+1)||
        !cJSON_IsFalse(draft)||!cJSON_IsFalse(pre)||!cJSON_IsArray(assets))goto finish;

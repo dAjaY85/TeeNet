@@ -38,9 +38,9 @@ static esp_http_client_handle_t github_open(const char *initial,int *status){
     return NULL;
 }
 static bool github_latest(github_release_t *release,char *error,size_t capacity){
-    int status=0;esp_http_client_handle_t c=github_open("https://api.github.com/repos/stetastic/TeeNet/releases/latest",&status);
+    int status=0;esp_http_client_handle_t c=github_open("https://github.com/stetastic/TeeNet/releases/latest/download/release.json",&status);
     if(!c){snprintf(error,capacity,status==403||status==429?"GitHub-Limit erreicht. Spaeter erneut pruefen.":"GitHub nicht erreichbar. Internet, Uhrzeit und WLAN pruefen.");return false;}
-    const size_t maximum=32768;char *body=malloc(maximum+1);size_t total=0;bool ok=body!=NULL;
+    const size_t maximum=8192;char *body=malloc(maximum+1);size_t total=0;bool ok=body!=NULL;
     int64_t deadline=now_ms()+25000;
     while(ok&&total<maximum&&now_ms()<deadline){int n=esp_http_client_read(c,body+total,maximum-total);if(n<0){ok=false;break;}if(!n)break;total+=n;}
     ok=ok&&total<maximum&&esp_http_client_is_complete_data_received(c);esp_http_client_cleanup(c);
